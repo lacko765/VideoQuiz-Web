@@ -1,0 +1,5 @@
+{
+  "GeminiModel": "gemini-3.5-flash-lite",
+  "Port": 8443,
+  "Note": "Setup creates local-settings.json and encrypted secrets.xml. Never put passwords or API keys here."
+}
