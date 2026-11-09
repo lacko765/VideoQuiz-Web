@@ -23,7 +23,21 @@ public class CloudConfiguration {
         props.setProperty("connectTimeout","15");props.setProperty("socketTimeout","30");props.setProperty("tcpKeepAlive","true");
         connections=()->DriverManager.getConnection("jdbc:postgresql://"+host+":5432/postgres",props);
         Connection db;
-        try{db=connections.open();}catch(SQLException e){throw new IllegalStateException("Cannot connect to the cloud database. Check session pooler settings and database password.");}
+       
+try {
+    db = connections.open();
+} catch (SQLException e) {
+    Throwable root = e;
+    while (root.getCause() != null) {
+        root = root.getCause();
+    }
+
+    System.err.println("DB_DIAG SQLState=" + e.getSQLState()
+        + " root=" + root.getClass().getSimpleName());
+
+    throw new IllegalStateException("Cannot connect to cloud database.");
+}
+
         try {
             var objects=new SupabaseObjects(env.getRequiredProperty("SUPABASE_URL"),env.getRequiredProperty("SUPABASE_SERVICE_ROLE_KEY"),env.getProperty("VIDEOQUIZ_BUCKET","videoquiz-private"));
             objects.verifyPrivateBucket();
