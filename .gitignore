@@ -1,0 +1,14 @@
+target/
+data/
+config/*.p12
+config/*.key
+config/*.crt
+.env
+*.log
+nbproject/private/
+backups/
+.tools/
+dist/
+config/local-settings.json
+config/secrets.xml
+config/setup-complete.json
