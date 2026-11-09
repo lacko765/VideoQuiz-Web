@@ -7,7 +7,7 @@ import java.util.*;
 import static edu.videoquiz.core.Models.*;
 
 /** Single-server file repository. Writes use temporary files and atomic replacement. */
-public final class Store {
+public class Store {
     private final Path root;
     private final Gson gson = new Gson();
     public Store(Path root) throws IOException {
@@ -15,6 +15,17 @@ public final class Store {
         for (String dir : List.of("videos", "attempts", "accounts", "media")) Files.createDirectories(this.root.resolve(dir));
     }
     public static String id() { return UUID.randomUUID().toString(); }
+    public void initializeMedia(Video v) throws IOException { Files.createFile(media(v.id)); }
+    public long uploadedBytes(Video v) throws IOException { return Files.size(media(v.id)); }
+    public Path prepareMedia(Video v) throws IOException {return media(v.id);}
+    public synchronized void appendMedia(Video v,long offset,byte[] bytes) throws IOException {
+        try(RandomAccessFile f=new RandomAccessFile(media(v.id).toFile(),"rw")) {f.seek(offset);f.write(bytes);f.getFD().sync();}
+        v.received=offset+bytes.length;v.message="Uploaded "+v.received+" of "+v.size+" bytes";save(v);
+    }
+    public long usableSpace() throws IOException { return Files.getFileStore(root).getUsableSpace(); }
+    public synchronized long accountCount() throws IOException {
+        try(var files=Files.list(root.resolve("accounts"))) {return files.filter(p->p.toString().endsWith(".json")).count();}
+    }
     private Path path(String type, String id) {
         if (!id.matches("[a-zA-Z0-9_-]{1,80}")) throw new IllegalArgumentException("Invalid identifier");
         return root.resolve(type).resolve(id + ".json");

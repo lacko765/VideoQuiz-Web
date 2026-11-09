@@ -9,6 +9,9 @@ import java.io.*;
 
 @Service
 public class Jobs {
+    @org.springframework.beans.factory.annotation.Value("${videoquiz.analysis-per-user-hour:0}") private int userLimit;
+    @org.springframework.beans.factory.annotation.Value("${videoquiz.analysis-per-hour:0}") private int globalLimit;
+    private final java.util.Map<String,java.util.ArrayDeque<Long>> requests = new java.util.HashMap<>();
     private final Store store; private final Gemini gemini;
     private final ExecutorService worker = Executors.newFixedThreadPool(2);
     private final Semaphore slots = new Semaphore(4);
@@ -25,19 +28,27 @@ public class Jobs {
                 v.duration=duration;
             }
             if (v.kind.equals("LOCAL") && (v.received != v.size || v.duration<=0)) throw new IllegalArgumentException("Finish uploading a valid video first.");
+            long now=System.currentTimeMillis();
+            for(var queue:requests.values()) while(!queue.isEmpty() && queue.peekFirst()<=now-3600000) queue.removeFirst();
+            requests.entrySet().removeIf(e -> e.getValue().isEmpty());
+            var userRequests=requests.computeIfAbsent(owner,k -> new java.util.ArrayDeque<>());
+            int total=requests.values().stream().mapToInt(java.util.Collection::size).sum();
+            if((userLimit>0 && userRequests.size()>=userLimit) || (globalLimit>0 && total>=globalLimit))
+                throw new IllegalArgumentException("Hourly analysis limit reached. Your video is saved. Please try again in an hour.");
             if (!slots.tryAcquire()) throw new IllegalArgumentException("Analysis queue is full. Your video is saved; retry shortly.");
             v.status="PROCESSING"; v.message="Queued for analysis"; v.externalWaitSince=System.currentTimeMillis();
             v.analysisRunId=run; v.points=new java.util.ArrayList<>(); v.questions=new java.util.ArrayList<>();
             try { store.save(v); } catch(IOException e) { slots.release(); throw e; }
+            userRequests.addLast(now);
         }
         FutureTask<Void> task=new FutureTask<>(() -> {
             try {
                 Video v=store.video(id,owner);
-                gemini.analyze(v,store.media(id),message -> {
+                gemini.analyze(v,v.kind.equals("LOCAL")?store.prepareMedia(v):store.media(id),message -> {
                     try { synchronized(store) { Video current=store.video(id,owner); if(!current.status.equals("PROCESSING") || !run.equals(current.analysisRunId)) throw new CancellationException(); current.message=message; current.externalWaitSince=System.currentTimeMillis(); store.save(current); } }
                     catch(IOException e) { throw new UncheckedIOException(e); }
                 });
-                synchronized(store) { Video current=store.video(id,owner); if(current.status.equals("PROCESSING") && run.equals(current.analysisRunId)) { v.status="READY"; v.message="Analysis complete. Your quiz is ready."; v.externalWaitSince=0; store.save(v); } }
+                synchronized(store) { Video current=store.video(id,owner); if(current.status.equals("PROCESSING") && run.equals(current.analysisRunId)) { v.revision=current.revision; v.status="READY"; v.message="Analysis complete. Your quiz is ready."; v.externalWaitSince=0; store.save(v); } }
             } catch(Exception e) {
                 try { synchronized(store) {
                     Video v=store.video(id,owner); v.status="FAILED"; v.externalWaitSince=0;

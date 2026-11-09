@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: videoquiz-web
+    runtime: docker
+    plan: free
+    branch: main
+    autoDeployTrigger: checksPass
+    healthCheckPath: /healthz
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod,cloud
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: VIDEOQUIZ_DB_HOST
+        sync: false
+      - key: VIDEOQUIZ_DB_USER
+        sync: false
+      - key: VIDEOQUIZ_DB_PASSWORD
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

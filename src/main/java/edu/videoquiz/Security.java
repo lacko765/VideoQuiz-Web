@@ -18,8 +18,9 @@ public class Security {
         };
     }
     @Bean SecurityFilterChain chain(HttpSecurity http) throws Exception {
-        http.requiresChannel(c -> c.anyRequest().requiresSecure());
-        http.authorizeHttpRequests(c -> c.requestMatchers("/","/index.html","/app.js","/quiz-clock.js","/styles.css","/api/csrf","/api/register","/api/login","/error").permitAll().anyRequest().authenticated());
+        // Internal platform health checks use HTTP; all application traffic still requires HTTPS.
+        http.requiresChannel(c -> c.requestMatchers(req -> !req.getRequestURI().equals("/healthz")).requiresSecure());
+        http.authorizeHttpRequests(c -> c.requestMatchers("/healthz","/","/index.html","/app.js","/quiz-clock.js","/styles.css","/api/csrf","/api/register","/api/login","/error").permitAll().anyRequest().authenticated());
         // Session-backed CSRF remains enabled, including registration/login/logout and chunk uploads.
         http.formLogin(c -> c.loginProcessingUrl("/api/login")
             .successHandler((req,res,a) -> { res.setContentType("application/json"); res.getWriter().write("{\"ok\":true}"); })

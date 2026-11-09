@@ -65,3 +65,7 @@ See [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md), [docs/COMPLIANCE.md](docs/COMP
 - `scripts/package-easysetup.ps1`: allowlisted clean ZIP creation, excluding secrets, data, backups, cached tools and build output.
 
 Send **VideoQuiz-Web-EasySetup.zip**, not a ZIP of your working folder. No prebuilt JAR is distributed; setup builds it.
+# Public website deployment
+
+For the $0 Render Free + Supabase Free setup, see [DEPLOYMENT.md](DEPLOYMENT.md). No credit card or paid plan is authorized. Cloud storage is separate from the existing NetBeans data. A public URL is available only after account setup, deployment and live verification.
+
