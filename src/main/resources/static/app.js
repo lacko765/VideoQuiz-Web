@@ -9,7 +9,7 @@ function error(message){$('alert').textContent=message;$('alert').hidden=false;}
 function formatTime(n){n=Math.max(0,Math.floor(n||0));return `${Math.floor(n/60).toString().padStart(2,'0')}:${(n%60).toString().padStart(2,'0')}`;}
 function element(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
 async function token(){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);try{const r=await fetch('/api/csrf',{credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('Cannot establish a secure session.');csrf=await r.json();}catch(e){if(e.name==='AbortError')throw Error('Cannot establish a session: the server has not responded within 4 seconds.');throw e;}finally{clearTimeout(timer);}}
-async function api(path,{method='GET',body,raw=false,timeout=4000}={}){
+async function api(path,{method='GET',body,raw=false,timeout=60000}={}){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
   try{
     const headers={};if(method!=='GET'&&csrf)headers[csrf.header]=csrf.token;
@@ -19,7 +19,7 @@ async function api(path,{method='GET',body,raw=false,timeout=4000}={}){
     const result=await r.json();
     if(!r.ok){if(r.status===401&&me){me=null;stopPolling();page('auth');$('logout').hidden=true;$('userLabel').textContent='';}throw Error(result.message||`Request failed (${r.status}).`);}
     return result;
-  }catch(e){if(e.name==='AbortError')throw Error('The server has not responded within 4 seconds. Check your connection; saved upload chunks and answers are retained.');throw e;}
+  }catch(e){if(e.name==='AbortError')throw Error('The server has not responded within 60 seconds. Check your connection; saved upload chunks and answers are retained.');throw e;}
   finally{clearTimeout(timer);}
 }
 async function signIn(create){
