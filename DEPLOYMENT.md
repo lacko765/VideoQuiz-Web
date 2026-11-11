@@ -1,3 +1,7 @@
+# Existing live deployment — November 2026 update
+
+The owner has deployed VideoQuiz at https://videoquiz-web.onrender.com using the existing Render Free and Supabase Free projects. **Do not recreate them.** See [the upgrade guide](docs/UPGRADE_2026-11-11.md) for branch review, tests and safe redeployment. Older setup/status statements below describe the initial delivery and are historical.
+
 # VideoQuiz: $0 cloud deployment
 
 Use **Render Free + Supabase Free**. Do not add a card, upgrade plans, enable billing, or select paid storage. If either account requires card verification, stop: deployment is blocked under the $0/no-card requirement. No public deployment has been verified yet.

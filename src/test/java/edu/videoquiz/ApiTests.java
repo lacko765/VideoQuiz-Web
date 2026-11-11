@@ -34,6 +34,17 @@ class ApiTests {
         video.questions=List.of(new Question("Fixture question?",List.of("A","B","C","D"),1,"Fixture explanation",0,2));store.save(video);
     }
     @Test void anonymousCannotReadVideos() throws Exception {mvc.perform(get("/api/videos").secure(true)).andExpect(status().isUnauthorized());}
+    @Test void registrationPasswordLoginAndLogoutUseRealSecurityChain() throws Exception {
+        String user="user_"+UUID.randomUUID().toString().replace("-","").substring(0,12);
+        mvc.perform(post("/api/register").secure(true).with(csrf()).contentType("application/json").content("{\"username\":\""+user+"\",\"password\":\"fixture-password-123\"}")).andExpect(status().isOk());
+        Assertions.assertNotEquals("fixture-password-123",store.account(user).passwordHash());
+        mvc.perform(post("/api/login").secure(true).with(csrf()).param("username",user).param("password","incorrect-password")).andExpect(status().isUnauthorized());
+        var result=mvc.perform(post("/api/login").secure(true).with(csrf()).param("username",user).param("password","fixture-password-123")).andExpect(status().isOk()).andReturn();
+        var session=(org.springframework.mock.web.MockHttpSession)result.getRequest().getSession(false);
+        mvc.perform(get("/api/me").secure(true).session(session)).andExpect(status().isOk()).andExpect(jsonPath("$.username").value(user));
+        mvc.perform(post("/api/logout").secure(true).session(session).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(get("/api/me").secure(true)).andExpect(status().isUnauthorized());
+    }
     @Test void httpRedirectsToHttps() throws Exception {mvc.perform(get("/api/videos")).andExpect(status().is3xxRedirection());}
     @Test @WithMockUser(username="alice") void answerKeysAreNotExposedBeforeSubmission() throws Exception {
         mvc.perform(get("/api/videos/"+video.id).secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$.questions[0].correctIndex").doesNotExist()).andExpect(jsonPath("$.points").doesNotExist());
@@ -62,6 +73,24 @@ class ApiTests {
         mvc.perform(get("/api/videos/"+video.id).secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$.externalWait").value(true));
     }
     @Test @WithMockUser(username="bob") void mediaRequiresOwnership() throws Exception {mvc.perform(get("/api/videos/"+video.id+"/media").secure(true)).andExpect(status().isNotFound());}
+    @Test @WithMockUser(username="alice") void incompleteReviewDoesNotRevealUnansweredKeys() throws Exception {
+        Attempt a=new Attempt();a.id=Store.id();a.owner="alice";a.videoId=video.id;store.save(a);
+        mvc.perform(get("/api/attempts/"+a.id).secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$.review").isEmpty()).andExpect(jsonPath("$.video.questions[0].correctIndex").doesNotExist()).andExpect(jsonPath("$.video.quizLanguage").value("en"));
+    }
+    @Test @WithMockUser(username="alice") void multipleAttemptsKeepSeparateScoresAndSummaries() throws Exception {
+        Attempt a=new Attempt();a.id=Store.id();a.owner="alice";a.videoId=video.id;a.answers.put(0,1);store.save(a);
+        Attempt b=new Attempt();b.id=Store.id();b.owner="alice";b.videoId=video.id;b.answers.put(0,0);store.save(b);
+        mvc.perform(get("/api/attempts/"+a.id).secure(true)).andExpect(jsonPath("$.score").value(1));
+        mvc.perform(get("/api/attempts/"+b.id).secure(true)).andExpect(jsonPath("$.score").value(0));
+        mvc.perform(get("/api/attempts").secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$[?(@.id == '"+b.id+"')].incorrect").value(1));
+    }
+    @Test @WithMockUser(username="bob") void attemptReviewRequiresOwnership() throws Exception {
+        Attempt a=new Attempt();a.id=Store.id();a.owner="alice";a.videoId=video.id;store.save(a);
+        mvc.perform(get("/api/attempts/"+a.id).secure(true)).andExpect(status().isNotFound());
+    }
+    @Test void publicSettingsContainOnlyBoundedTimeouts() throws Exception {
+        mvc.perform(get("/api/settings").secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$.youtubeApiMs").value(60000)).andExpect(jsonPath("$.youtubePlayerMs").value(60000)).andExpect(jsonPath("$.youtubeMetadataMs").value(60000)).andExpect(jsonPath("$.key").doesNotExist());
+    }
     @Test @WithMockUser(username="alice") void mediaSupportsByteRanges() throws Exception {
         video.kind="LOCAL";video.duration=10;video.size=100;video.received=100;store.save(video);Files.write(store.media(video.id),new byte[100]);
         mvc.perform(get("/api/videos/"+video.id+"/media").secure(true).header("Range","bytes=10-19")).andExpect(status().isPartialContent()).andExpect(header().string("Content-Range","bytes 10-19/100")).andExpect(content().bytes(new byte[10]));

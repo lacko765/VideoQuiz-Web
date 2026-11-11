@@ -18,6 +18,10 @@ public class Jobs {
     private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
     public Jobs(Store store, Gemini gemini) { this.store=store; this.gemini=gemini; }
     public void start(String id,String owner,Double duration) throws IOException {
+        start(id,owner,duration,null);
+    }
+    public void start(String id,String owner,Double duration,String language) throws IOException {
+        if(language!=null && !language.equals("en") && !language.equals("ar")) throw new IllegalArgumentException("Choose Arabic or English for quiz questions.");
         final String run=Store.id();
         synchronized(store) {
             Video v=store.video(id,owner);
@@ -36,6 +40,7 @@ public class Jobs {
             if((userLimit>0 && userRequests.size()>=userLimit) || (globalLimit>0 && total>=globalLimit))
                 throw new IllegalArgumentException("Hourly analysis limit reached. Your video is saved. Please try again in an hour.");
             if (!slots.tryAcquire()) throw new IllegalArgumentException("Analysis queue is full. Your video is saved; retry shortly.");
+            if(v.quizLanguage==null) v.quizLanguage=language==null?"en":language;
             v.status="PROCESSING"; v.message="Queued for analysis"; v.externalWaitSince=System.currentTimeMillis();
             v.analysisRunId=run; v.points=new java.util.ArrayList<>(); v.questions=new java.util.ArrayList<>();
             try { store.save(v); } catch(IOException e) { slots.release(); throw e; }

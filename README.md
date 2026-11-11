@@ -1,3 +1,7 @@
+# Existing live deployment — November 2026 update
+
+The owner has deployed VideoQuiz at https://videoquiz-web.onrender.com using the existing Render Free and Supabase Free projects. **Do not recreate them.** See [the upgrade guide](docs/UPGRADE_2026-11-11.md) for branch review, tests and safe redeployment. Older setup/status statements below describe the initial delivery and are historical.
+
 # VideoQuiz Web — Easy Setup
 
 Java 17 / Spring Boot / Maven application for real Gemini video analysis, timed questions, authenticated uploads, scoring and history. This updates the existing web project; the original E:\VideoQuiz is not modified.

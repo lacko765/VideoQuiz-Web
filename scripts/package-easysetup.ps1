@@ -6,7 +6,7 @@ Add-Type -AssemblyName System.IO.Compression
 New-Item -ItemType Directory -Path (Join-Path $root 'dist') -Force | Out-Null
 $output=Join-Path $root ('dist/'+$Name)
 if(Test-Path -LiteralPath $output){throw 'Archive already exists; choose a new filename to preserve it.'}
-$files=@('pom.xml','nbactions.xml','README.md','HOW_TO_RUN_IN_NETBEANS.md','DEPLOYMENT.md','.gitignore','.dockerignore','Dockerfile','render.yaml','setup-videoquiz.bat','start-videoquiz.bat','config/settings.example.json','lib/gson-2.13.2.jar')
+$files=@('pom.xml','nbactions.xml','README.md','HOW_TO_RUN_IN_NETBEANS.md','DEPLOYMENT.md','.gitignore','.dockerignore','Dockerfile','render.yaml','setup-videoquiz.bat','start-videoquiz.bat','src/main/resources/supabase-ca.crt','config/settings.example.json','lib/gson-2.13.2.jar','tests/fixtures/educational.mp4')
 foreach($folder in @('src','tests','scripts','.github','docs')){
     $files+=Get-ChildItem -LiteralPath (Join-Path $root $folder) -Recurse -File | Where-Object { $_.Extension -in @('.java','.js','.cjs','.css','.html','.properties','.ps1','.md','.yml','.yaml','.pdf') -or $_.Name -eq 'org.mockito.plugins.MockMaker' } | ForEach-Object { $_.FullName.Substring($root.Length+1).Replace('\','/') }
 }

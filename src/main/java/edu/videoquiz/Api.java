@@ -27,7 +27,7 @@ public class Api {
     public record Upload(String name,long size,String sha256) {}
     public record Link(String url) {}
     public record Selection(Integer questionIndex,Integer optionIndex) {}
-    public record Analysis(Double durationSeconds) {}
+    public record Analysis(Double durationSeconds,String language) {}
 
     @GetMapping("/csrf") public Map<String,String> csrf(CsrfToken token) { return Map.of("token",token.getToken(),"header",token.getHeaderName()); }
     @PostMapping("/register") public Map<String,Boolean> register(@RequestBody Credentials c) throws IOException {
@@ -100,7 +100,7 @@ public class Api {
         List<Map<String,Object>> out=new ArrayList<>(); for(Video v:store.videos(p.getName())) out.add(view(v)); return out;
     }
     @GetMapping("/videos/{id}") public Map<String,Object> video(@PathVariable String id,Principal p) throws IOException { return view(store.video(id,p.getName())); }
-    @PostMapping("/videos/{id}/analyze") public Map<String,Object> analyze(@PathVariable String id,@RequestBody(required=false) Analysis input,Principal p) throws IOException { jobs.start(id,p.getName(),input==null?null:input.durationSeconds()); return view(store.video(id,p.getName())); }
+    @PostMapping("/videos/{id}/analyze") public Map<String,Object> analyze(@PathVariable String id,@RequestBody(required=false) Analysis input,Principal p) throws IOException { jobs.start(id,p.getName(),input==null?null:input.durationSeconds(),input==null?null:input.language()); return view(store.video(id,p.getName())); }
     @GetMapping("/videos/{id}/media") public ResponseEntity<Resource> media(@PathVariable String id,Principal p) throws IOException {
         Video v=store.video(id,p.getName());
         if(!v.kind.equals("LOCAL") || v.duration<=0 || v.received!=v.size) throw new NoSuchElementException("Playable video not found");
@@ -117,7 +117,9 @@ public class Api {
     }
     @GetMapping("/attempts") public List<Map<String,Object>> attempts(Principal p) throws IOException {
         List<Map<String,Object>> out=new ArrayList<>();
-        for(Attempt a:store.attempts(p.getName())) { Video v=store.video(a.videoId,p.getName()); out.add(Map.of("id",a.id,"videoId",v.id,"title",v.title,"created",a.created,"score",Validation.score(a,v),"answered",a.answers.size(),"total",v.questions.size())); }
+        for(Attempt a:store.attempts(p.getName())) { Video v=store.video(a.videoId,p.getName()); int score=Validation.score(a,v),total=v.questions.size(); Map<String,Object> summary=new LinkedHashMap<>();
+            summary.put("id",a.id);summary.put("videoId",v.id);summary.put("title",v.title);summary.put("created",a.created);summary.put("score",score);summary.put("answered",a.answers.size());summary.put("total",total);
+            summary.put("incorrect",a.answers.size()-score);summary.put("percentage",total==0?0:Math.round(100.0*score/total));summary.put("complete",a.answers.size()==total);out.add(summary); }
         return out;
     }
     @GetMapping("/attempts/{id}") public Map<String,Object> attempt(@PathVariable String id,Principal p) throws IOException {
@@ -135,6 +137,7 @@ public class Api {
         out.put("id",v.id); out.put("title",v.title); out.put("kind",v.kind); out.put("youtubeId",v.youtubeId);
         out.put("status",v.status); out.put("duration",v.duration); out.put("size",v.size); out.put("sha256",v.sha256); out.put("received",v.kind.equals("LOCAL") ? store.uploadedBytes(v) : 0);
         out.put("created",v.created); out.put("message",v.message);
+        out.put("quizLanguage",v.quizLanguage==null?"en":v.quizLanguage);
         boolean waiting=v.status.equals("PROCESSING") && v.externalWaitSince>0 && System.currentTimeMillis()-v.externalWaitSince>10000;
         out.put("externalWait",waiting);
         out.put("notice",waiting ? "The external service has not finished responding for over 10 seconds; it may be slow or unreachable. Your saved upload is retained." : "");
