@@ -10,6 +10,7 @@ public final class Models {
         public long size, received, created = System.currentTimeMillis(), externalWaitSince;
         public double duration;
         public String analysisRunId;
+        public String quizLanguage;
         public List<Point> points = new ArrayList<>();
         public List<Question> questions = new ArrayList<>();
     }

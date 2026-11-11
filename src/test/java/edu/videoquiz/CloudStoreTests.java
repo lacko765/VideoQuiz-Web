@@ -24,13 +24,14 @@ class CloudStoreTests {
     @Test void accountHistoryAndChunkedMediaSurviveEmptyCacheRestart()throws Exception{
         String id,attempt;
         try(var s=open("first")){
-            s.register("alice","fixture-hash");Video v=video(s);id=v.id;
+            s.register("alice","fixture-hash");Video v=video(s);id=v.id;v.quizLanguage="ar";s.save(v);
             s.appendMedia(v,0,new byte[]{1,2});s.appendMedia(v,2,new byte[]{3,4,5});
             Attempt a=new Attempt();a.id=Store.id();a.owner="alice";a.videoId=id;a.answers.put(0,2);s.save(a);attempt=a.id;
         }
         try(var s=open("second")){
             assertEquals("fixture-hash",s.account("alice").passwordHash());
             Video v=s.video(id,"alice");assertEquals(5,s.uploadedBytes(v));
+            assertEquals("ar",v.quizLanguage);
             assertArrayEquals(new byte[]{1,2,3,4,5},Files.readAllBytes(s.prepareMedia(v)));
             assertEquals(2,s.attempt(attempt,"alice").answers.get(0));
             assertThrows(NoSuchElementException.class,()->s.video(id,"bob"));
