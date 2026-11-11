@@ -12,6 +12,7 @@ public class CloudStore extends Store implements AutoCloseable {
     public interface Objects {
         void put(String key,byte[] bytes) throws IOException;
         byte[] get(String key) throws IOException;
+        void remove(List<String> keys) throws IOException;
     }
     private Connection db;
     private final Objects objects;
@@ -22,6 +23,7 @@ public class CloudStore extends Store implements AutoCloseable {
             statement.execute("CREATE SCHEMA IF NOT EXISTS videoquiz_private");
             statement.execute("CREATE TABLE IF NOT EXISTS videoquiz_private.records (kind VARCHAR(12) NOT NULL, id VARCHAR(80) NOT NULL, owner VARCHAR(80) NOT NULL, body TEXT NOT NULL, revision BIGINT NOT NULL, PRIMARY KEY(kind,id))");
             statement.execute("CREATE TABLE IF NOT EXISTS videoquiz_private.chunks (video_id VARCHAR(80) NOT NULL, position BIGINT NOT NULL, object_key VARCHAR(160) NOT NULL, size INTEGER NOT NULL, PRIMARY KEY(video_id,position))");
+            statement.execute("CREATE TABLE IF NOT EXISTS videoquiz_private.deletion_queue (object_key VARCHAR(160) PRIMARY KEY)");
         } catch(SQLException e) {throw failure();}
     }
     private IOException failure() {return new IOException("Cloud storage is unavailable. Check the database and private bucket settings; retry shortly.");}
@@ -124,11 +126,62 @@ public class CloudStore extends Store implements AutoCloseable {
             return target;
         }catch(SQLException e){throw failure();}finally{Files.deleteIfExists(tmp);}
     }
+    @Override public synchronized void deleteVideo(String id,String owner) throws IOException {
+        Video v=video(id,owner); // Authorization before any deletion.
+        if("PROCESSING".equals(v.status)) throw new IllegalArgumentException("Wait for analysis to finish before deleting this video.");
+        try {
+            db.setAutoCommit(false);
+            try {
+                // Queue object cleanup in the same transaction as deleting metadata.
+                // If Supabase is unavailable later, a scheduled recovery can retry safely.
+                try(var select=db.prepareStatement("SELECT object_key FROM videoquiz_private.chunks WHERE video_id=?");
+                    var enqueue=db.prepareStatement("INSERT INTO videoquiz_private.deletion_queue (object_key) VALUES (?)")) {
+                    select.setString(1,id);
+                    try(var rows=select.executeQuery()) {while(rows.next()) {enqueue.setString(1,rows.getString(1));enqueue.executeUpdate();}}
+                }
+                // Attempts belong to the same owner and video; unrelated history remains untouched.
+                for(Attempt a:attempts(owner)) if(id.equals(a.videoId)) {
+                    try(var remove=db.prepareStatement("DELETE FROM videoquiz_private.records WHERE kind='attempts' AND id=? AND owner=?")) {
+                        remove.setString(1,a.id);remove.setString(2,owner);remove.executeUpdate();
+                    }
+                }
+                try(var chunks=db.prepareStatement("DELETE FROM videoquiz_private.chunks WHERE video_id=?");
+                    var videoRow=db.prepareStatement("DELETE FROM videoquiz_private.records WHERE kind='videos' AND id=? AND owner=?")) {
+                    chunks.setString(1,id);chunks.executeUpdate();
+                    videoRow.setString(1,id);videoRow.setString(2,owner);
+                    if(videoRow.executeUpdate()!=1) throw new IOException("Saved state changed. Refresh and retry the operation.");
+                }
+                db.commit();
+            } catch(Exception e) {
+                try{db.rollback();}catch(SQLException ignored){}
+                if(e instanceof NoSuchElementException)throw (NoSuchElementException)e;
+                throw failure();
+            }
+        } catch(SQLException e){throw failure();}
+        finally{try{db.setAutoCommit(true);}catch(SQLException e){throw failure();}}
+        try{Files.deleteIfExists(media(id));}catch(IOException e){System.err.println("Temporary video cache cleanup will be retried on restart.");}
+        // Clean up immediately when possible; failed objects remain queued for recovery.
+        try {cleanupDeletedObjects();} catch(IOException e) {System.err.println("Private object deletion is queued for retry.");}
+    }
+    /** Retry-safe deletion of orphaned objects through Supabase Storage API, never direct Storage SQL. */
+    private synchronized void cleanupDeletedObjects() throws IOException {
+        List<String> batch=new ArrayList<>();
+        try(var select=db.prepareStatement("SELECT object_key FROM videoquiz_private.deletion_queue ORDER BY object_key LIMIT 500");
+            var rows=select.executeQuery()) {while(rows.next())batch.add(rows.getString(1));}
+        catch(SQLException e){throw failure();}
+        if(batch.isEmpty())return;
+        objects.remove(batch);
+        try(var remove=db.prepareStatement("DELETE FROM videoquiz_private.deletion_queue WHERE object_key=?")) {
+            for(String key:batch){remove.setString(1,key);remove.addBatch();}
+            remove.executeBatch();
+        }catch(SQLException e){throw failure();}
+    }
     @Override public synchronized void recover() throws IOException {
         // During a rolling deploy the old server may still own active jobs. Only expire stale jobs.
         for(Video v:videos(null))if("PROCESSING".equals(v.status) && System.currentTimeMillis()-v.externalWaitSince>720000) {
             v.status="FAILED";v.message="Analysis was interrupted. Your video is saved; retry analysis.";v.externalWaitSince=0;save(v);
         }
+        try{cleanupDeletedObjects();}catch(IOException e){System.err.println("Private object cleanup will be retried.");}
     }
     @Override public synchronized void close() throws SQLException {db.close();}
 }

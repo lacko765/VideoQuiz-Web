@@ -44,4 +44,19 @@ public class SupabaseObjects implements CloudStore.Objects {
     }
     @Override public void put(String path,byte[] bytes) throws IOException {send(request(path,false).header("Content-Type","application/octet-stream").POST(HttpRequest.BodyPublishers.ofByteArray(bytes)).build());}
     @Override public byte[] get(String path) throws IOException {return send(request(path,true).GET().build());}
+    @Override public void remove(java.util.List<String> paths) throws IOException {
+        if(paths.isEmpty())return;
+        if(paths.size()>1000 || paths.stream().anyMatch(p->!p.matches("[a-f0-9-]{36}/[a-f0-9-]{36}")))
+            throw new IllegalArgumentException("Invalid private object deletion request.");
+        // Supabase Storage DELETE /object/{bucket} with JSON {prefixes:[...]}; never delete storage.objects with SQL.
+        String payload=new com.google.gson.Gson().toJson(java.util.Map.of("prefixes",paths));
+        var req=HttpRequest.newBuilder(URI.create(base+"/storage/v1/object/"+bucket)).timeout(Duration.ofSeconds(45))
+            .header("apikey",key).header("Authorization","Bearer "+key)
+            .header("Content-Type","application/json")
+            .method("DELETE",HttpRequest.BodyPublishers.ofString(payload)).build();
+        try {
+            var response=client.send(req,HttpResponse.BodyHandlers.discarding());
+            if(response.statusCode()/100!=2)throw new IOException("Could not delete private video objects. Cleanup is queued for retry.");
+        }catch(InterruptedException e){Thread.currentThread().interrupt();throw new IOException("Private object deletion interrupted.");}
+    }
 }

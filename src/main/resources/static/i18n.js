@@ -29,10 +29,12 @@ Object.assign(ar,{
 'Use 3–32 lowercase letters, digits or underscores for your username.':'استخدم 3 إلى 32 حرفاً إنجليزياً صغيراً أو رقماً أو شرطة سفلية لاسم المستخدم.',
 'Video processing failed. Check the format, service connection and server configuration, then retry.':'تعذرت معالجة الفيديو. تحقق من التنسيق واتصال الخدمة وإعدادات الخادم ثم حاول مجدداً.',
 'Saved state changed. Refresh and retry the operation.':'تغيرت الحالة المحفوظة. حدّث الصفحة وأعد المحاولة.',
+'Storage used':'مساحة الفيديوهات المستخدمة','Delete video':'حذف الفيديو','Deleting…':'جارٍ الحذف…','Cannot delete during analysis':'لا يمكن الحذف أثناء التحليل','This video and its quiz attempts will be permanently deleted. Continue?':'سيتم حذف هذا الفيديو وجميع محاولات الاختبار المرتبطة به نهائيًا. هل تريد المتابعة؟','Video deleted. Storage usage updated.':'تم حذف الفيديو وتحديث مساحة التخزين.','Wait for analysis to finish before deleting this video.':'انتظر انتهاء التحليل قبل حذف هذا الفيديو.','Your storage limit is reached (30 videos / 1 GiB). Open My Quizzes to delete an unused video and its attempts.':'وصلت إلى حد التخزين (30 فيديو / 1 جيبيبايت). افتح اختباراتي السابقة لحذف فيديو غير مطلوب ومحاولاته.',
 'Invalid answer option.':'خيار الإجابة غير صالح.','Invalid or duplicate answer option.':'خيار الإجابة غير صالح أو مكرر.',
 'Invalid identifier':'معرّف غير صالح.','Invalid video ID':'معرّف الفيديو غير صالح.','Invalid username':'اسم المستخدم غير صالح.'
 });
 const patterns=[
+[/^Storage used: (\d+)\/30 videos · ([\d.]+) \/ 1024 MiB$/,(_,count,size)=>`مساحة الفيديوهات المستخدمة: ${count} من 30 فيديو · ${size} من 1024 ميبيبايت`],
 [/^(Invalid|Unsupported|Truncated or invalid) MP4.*$/,()=> 'بنية ملف MP4 أو مدته أو ترميزه غير صالح. اختر ملف H.264 MP4 آخر.'],
 [/^AI service (did not|supplied).*$/,()=> 'تعذر إرسال الفيديو إلى خدمة الذكاء الاصطناعي. الفيديو محفوظ؛ حاول مجدداً.'],
 [/^Invalid AI file reference\.$/,()=> 'مرجع ملف الذكاء الاصطناعي غير صالح. أعد التحليل.'],

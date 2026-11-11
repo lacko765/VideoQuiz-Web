@@ -13,10 +13,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class CloudStoreTests {
     @TempDir Path dir;
     Map<String,byte[]> objects=new HashMap<>();
-    boolean failPut;
+    boolean failPut,failRemove;
     CloudStore.Objects transport=new CloudStore.Objects(){
         public void put(String key,byte[] bytes)throws IOException{if(failPut)throw new IOException("fixture outage");objects.put(key,bytes.clone());}
         public byte[] get(String key)throws IOException{if(!objects.containsKey(key))throw new IOException("fixture missing");return objects.get(key);}
+        public void remove(java.util.List<String> keys)throws IOException{if(failRemove)throw new IOException("fixture delete outage");for(String key:keys)objects.remove(key);}
     };
     String url="jdbc:h2:mem:"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
     CloudStore open(String cache)throws Exception{return new CloudStore(dir.resolve(cache),DriverManager.getConnection(url),transport);}

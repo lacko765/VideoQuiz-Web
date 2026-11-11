@@ -73,3 +73,10 @@ Send **VideoQuiz-Web-EasySetup.zip**, not a ZIP of your working folder. No prebu
 
 For the $0 Render Free + Supabase Free setup, see [DEPLOYMENT.md](DEPLOYMENT.md). No credit card or paid plan is authorized. Cloud storage is separate from the existing NetBeans data. A public URL is available only after account setup, deployment and live verification.
 
+
+## Video cleanup and AI resilience (upgrade candidate)
+
+- My Quizzes shows used video slots and bytes. Deleting a video requires confirmation and **permanently deletes its associated quiz attempts, scores and answers**. Other videos and attempts remain untouched. Active analyses cannot be deleted.
+- Local videos and cached media are removed. Cloud video metadata and attempts are removed transactionally, and its private Supabase objects are deleted using the **Storage API**. If Supabase is unavailable, the deletion queue retries on scheduled cloud recovery.
+- Gemini generation retries transient HTTP 408, 429 and 5xx responses twice with short exponential backoff; uploads are not replayed. Persistent failures (including 503 from a busy provider) still require provider recovery. This is not proof that live Gemini will succeed.
+- No new cloud credentials, payment plan, or manual database migration are needed; database deletion-queue table is created on first cloud launch. **Review before deploying.**

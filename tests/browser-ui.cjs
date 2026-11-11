@@ -8,7 +8,8 @@ const browser=await chromium.launch({executablePath:process.env.BROWSER_EXE,head
 let logged=false,video=null,attempts=[],analyses=0,failAnalysis=true;const questions=[2,8,12].map((timestamp,i)=>({index:i,question:['What is two plus three?','How many sides does a triangle have?','What is four times two?'][i],options:['Five','Three','Eight','Ten'],timestamp}));
 function view(a){return {...a,video:{...video,questions},review:Object.entries(a.answers).map(([i,v])=>({questionIndex:+i,selectedIndex:v,correctIndex:+i,explanation:'Fixture explanation from the video.',evidence:{start:0,end:questions[i].timestamp,evidence:'Fixture video evidence.'}})),score:Object.entries(a.answers).filter(([i,v])=>+i===v).length,total:3,complete:Object.keys(a.answers).length===3};}
 await page.route('**/api/**',async route=>{const req=route.request(),u=new URL(req.url()),p=u.pathname;let body=req.headers()['content-type']?.includes('application/octet-stream')?null:req.postDataJSON?.(),result={},code=200;
-if(p==='/api/settings')result={youtubeApiMs:60000,youtubePlayerMs:60000,youtubeMetadataMs:60000};
+if(p==='/api/videos/video-1'&&req.method()==='DELETE'){video=null;attempts=[];code=204;}
+ else if(p==='/api/settings')result={youtubeApiMs:60000,youtubePlayerMs:60000,youtubeMetadataMs:60000};
 else if(p==='/api/csrf')result={token:'fixture',header:'X-CSRF-TOKEN'};
 else if(p==='/api/me'){code=logged?200:401;result=logged?{username:'student',aiConfigured:true}:{message:'Please sign in to access your videos and results.'};}
 else if(p==='/api/register')result={ok:true};
@@ -50,6 +51,18 @@ await page.setViewportSize({width:360,height:800});await page.screenshot({path:p
 await page.locator('#homeNav').click();await page.evaluate(()=>window.fixtureNeverReady=true);await page.locator('#url').fill('https://youtu.be/tVHOBVAFjUw');await page.locator('#analyze').click();await page.clock.runFor(61000);await page.locator('#alert').waitFor({state:'visible'});assert.equal(analyses,2);assert.equal(await page.locator('#retry').isVisible(),true);await page.evaluate(()=>window.fixtureNeverReady=false);await page.locator('#retry').click();await page.clock.runFor(41000);await page.waitForFunction(()=>!!attempt);assert.equal(analyses,3);checks.push('Player-ready timeout retains link and retry reconstructs the player');
 await page.locator('#homeNav').click();await page.evaluate(()=>window.fixtureNeverMetadata=true);await page.locator('#url').fill('https://youtu.be/tVHOBVAFjUw');await page.locator('#analyze').click();await page.clock.runFor(86000);await page.locator('#alert').waitFor({state:'visible'});assert.equal(analyses,3);await page.evaluate(()=>{window.fixtureNeverMetadata=false;fixturePlayer.duration=30;});await page.locator('#retry').click();await page.waitForFunction(()=>!!attempt);assert.equal(analyses,4);checks.push('Zero metadata never reaches Gemini; retry succeeds after valid duration arrives');
 await page.locator('#homeNav').click();await page.locator('#file').setInputFiles(path.resolve(__dirname,'fixtures/educational.mp4'));await page.locator('#analyze').click();await page.waitForFunction(()=>!!attempt&&activeVideo?.kind==='LOCAL');assert.ok(video.received>0);await page.waitForFunction(()=>document.querySelector('#video').duration>0);assert.equal(analyses,5);checks.push('Real H.264 MP4 preview, fingerprint, upload and quiz flow with HTTP/Gemini fixtures');
-await page.locator('#logout').click();await page.locator('#auth').waitFor({state:'visible'});checks.push('Logout UI');assert.deepEqual(errors,[]);
+await page.locator('#historyNav').click();await page.locator('#videosList .delete-video').first().waitFor();
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#videosList .delete-video').first().click();
+ 
+await page.waitForFunction(() =>
+  document.querySelectorAll('#videosList .delete-video').length === 0 &&
+  /(?:0\/30 videos|0 من 30 فيديو)/.test(
+    document.querySelector('#storageUsage')?.textContent || ''
+  )
+);
+
+ assert.equal(await page.locator('#videosList .delete-video').count(),0);assert.equal(await page.locator('#attemptsList .card').count(),0);
+ checks.push('Deletion confirmation removes owned video and related history and refreshes quota');
+ await page.locator('#logout').click();await page.locator('#auth').waitFor({state:'visible'});checks.push('Logout UI');assert.deepEqual(errors,[]);
 }finally{fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors},null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
