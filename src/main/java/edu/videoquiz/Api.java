@@ -43,7 +43,7 @@ public class Api {
     @GetMapping("/me") public Map<String,Object> me(Principal p) { return Map.of("username",p.getName(),"aiConfigured",gemini.configured()); }
     private void quota(String owner,long newSize) throws IOException {
         List<Video> videos=store.videos(owner);
-        if(videos.size()>=30 || videos.stream().mapToLong(v -> v.size).sum()+newSize>MAX_USER) throw new IllegalArgumentException("Your storage limit is reached (30 videos / 1 GiB). Ask the server administrator to archive old data.");
+        if(videos.size()>=30 || videos.stream().mapToLong(v -> v.size).sum()+newSize>MAX_USER) throw new IllegalArgumentException("Your storage limit is reached (30 videos / 1 GiB). Open My Quizzes to delete an unused video and its attempts.");
         if(totalStorage>0 && store.videos(null).stream().mapToLong(v->v.size).sum()+newSize>totalStorage)
             throw new IllegalArgumentException("The website's shared video storage limit is reached. Try a YouTube link or contact the owner.");
         if(reserve>0 && store.usableSpace()<newSize+reserve) throw new IllegalArgumentException("The server has insufficient free storage. Contact the website owner.");
@@ -100,6 +100,14 @@ public class Api {
         List<Map<String,Object>> out=new ArrayList<>(); for(Video v:store.videos(p.getName())) out.add(view(v)); return out;
     }
     @GetMapping("/videos/{id}") public Map<String,Object> video(@PathVariable String id,Principal p) throws IOException { return view(store.video(id,p.getName())); }
+    @GetMapping("/storage") public Map<String,Long> storage(Principal p) throws IOException {
+        List<Video> videos=store.videos(p.getName());
+        return Map.of("usedVideos",(long)videos.size(),"maxVideos",30L,"usedBytes",videos.stream().mapToLong(v->v.size).sum(),"maxBytes",MAX_USER);
+    }
+    @DeleteMapping("/videos/{id}") public ResponseEntity<Void> deleteVideo(@PathVariable String id,Principal p) throws IOException {
+        synchronized(store){store.deleteVideo(id,p.getName());}
+        return ResponseEntity.noContent().build();
+    }
     @PostMapping("/videos/{id}/analyze") public Map<String,Object> analyze(@PathVariable String id,@RequestBody(required=false) Analysis input,Principal p) throws IOException { jobs.start(id,p.getName(),input==null?null:input.durationSeconds(),input==null?null:input.language()); return view(store.video(id,p.getName())); }
     @GetMapping("/videos/{id}/media") public ResponseEntity<Resource> media(@PathVariable String id,Principal p) throws IOException {
         Video v=store.video(id,p.getName());

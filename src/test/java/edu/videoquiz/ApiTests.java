@@ -88,6 +88,16 @@ class ApiTests {
         Attempt a=new Attempt();a.id=Store.id();a.owner="alice";a.videoId=video.id;store.save(a);
         mvc.perform(get("/api/attempts/"+a.id).secure(true)).andExpect(status().isNotFound());
     }
+    @Test @WithMockUser(username="alice") void deletionRequiresCsrfAndOwnedVideo() throws Exception {
+        mvc.perform(delete("/api/videos/"+video.id).secure(true)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/storage").secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$.maxVideos").value(30));
+        mvc.perform(delete("/api/videos/"+video.id).secure(true).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(get("/api/videos/"+video.id).secure(true)).andExpect(status().isNotFound());
+    }
+    @Test @WithMockUser(username="bob") void anotherUserCannotDeleteVideo() throws Exception {
+        mvc.perform(delete("/api/videos/"+video.id).secure(true).with(csrf())).andExpect(status().isNotFound());
+        Assertions.assertEquals(video.id,store.video(video.id,"alice").id);
+    }
     @Test void publicSettingsContainOnlyBoundedTimeouts() throws Exception {
         mvc.perform(get("/api/settings").secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$.youtubeApiMs").value(60000)).andExpect(jsonPath("$.youtubePlayerMs").value(60000)).andExpect(jsonPath("$.youtubeMetadataMs").value(60000)).andExpect(jsonPath("$.key").doesNotExist());
     }

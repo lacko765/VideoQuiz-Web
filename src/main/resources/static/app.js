@@ -212,8 +212,24 @@ async function loadDashboard(){const user=me?.username;if(!user)return;try{const
 async function history(){if(!me)return page('auth');stopPolling();pausePlayer();page('history');historyData=null;historyLimit=12;$('videosList').textContent='Loading your videos…';$('attemptsList').textContent='Loading your attempts…';const user=me.username;try{const [videos,attempts]=await Promise.all([api('/videos'),api('/attempts')]);if(me?.username!==user)return;historyData={videos,attempts:attempts.sort((a,b)=>b.created-a.created)};renderHistory();}catch(e){error(e.message);}}
 function renderHistory(){
   if(!historyData)return;const {videos,attempts}=historyData;stats(attempts,'historyStats');renderDashboard(attempts);$('videosList').replaceChildren();$('attemptsList').replaceChildren();$('performance').replaceChildren();
+  const count=videos.length,bytes=videos.reduce((n,v)=>n+(v.size||0),0);
+  $('storageUsage').textContent=`Storage used: ${count}/30 videos · ${(bytes/1048576).toFixed(1)} / 1024 MiB`;
   if(!videos.length)$('videosList').append(element('p','Your first learning session starts with a video.','empty'));
-  for(const v of videos){const card=element('article',undefined,'card');card.append(element('span',v.status,'pill'),content('h3',v.title),element('p',v.message));const b=element('button',v.status==='UPLOADING'?'Resume upload':v.status==='READY'?'Open quiz':'Open video','secondary');b.onclick=()=>{if(v.status==='UPLOADING'){resumeVideo=v;selectedFile=null;page('home');$('file').value='';$('fileName').textContent=v.title;error('Reselect the original file, then press Analyze & play. Your saved upload will resume.');}else openVideo(v);};card.append(b);$('videosList').append(card);}
+  for(const v of videos){const card=element('article',undefined,'card');card.append(element('span',v.status,'pill'),content('h3',v.title),element('p',v.message));const b=element('button',v.status==='UPLOADING'?'Resume upload':v.status==='READY'?'Open quiz':'Open video','secondary');b.onclick=()=>{if(v.status==='UPLOADING'){resumeVideo=v;selectedFile=null;page('home');$('file').value='';$('fileName').textContent=v.title;error('Reselect the original file, then press Analyze & play. Your saved upload will resume.');}else openVideo(v);};card.append(b);
+    const remove=element('button','Delete video','secondary delete-video');remove.type='button';
+    remove.disabled=v.status==='PROCESSING';
+    if(remove.disabled)remove.title='Cannot delete during analysis';
+    remove.onclick=async()=>{
+      if(!window.confirm(I18n.translate('This video and its quiz attempts will be permanently deleted. Continue?')))return;
+      remove.disabled=true;remove.textContent='Deleting…';
+      try {await api('/videos/'+encodeURIComponent(v.id),{method:'DELETE'});
+        historyData.videos=historyData.videos.filter(x=>x.id!==v.id);
+        historyData.attempts=historyData.attempts.filter(x=>x.videoId!==v.id);
+        if(resumeVideo?.id===v.id)resumeVideo=null;
+        renderHistory();
+      } catch(e){remove.disabled=false;remove.textContent='Delete video';error(e.message);}
+    };
+    card.append(remove);$('videosList').append(card);}
   if(!attempts.length){$('attemptsList').append(element('p','Completed and in-progress attempts will appear here.','empty'));$('performance').append(element('p','Complete a quiz to start tracking your progress.','empty'));}
   for(const a of attempts.slice(0,historyLimit)){const card=element('article',undefined,'card');card.append(element('span',a.answered===a.total?'Completed':'In progress','pill'),content('h3',a.title),content('p',I18n.date(a.created)),element('div',Math.round(a.total?100*a.score/a.total:0)+'%','attempt-score'));const details=element('div',undefined,'attempt-details');details.append(element('span',`${a.total} questions`),element('span',`${a.score} correct`),element('span',`${a.answered-a.score} incorrect`),element('span',`${a.total-a.answered} unanswered`));card.append(details);const b=element('button','View full results','secondary');b.onclick=()=>showResults(a.id);card.append(b);$('attemptsList').append(card);}
   if(attempts.length&&!attempts.some(a=>a.answered===a.total))$('performance').append(element('p','Complete a quiz to start tracking your progress.','empty'));

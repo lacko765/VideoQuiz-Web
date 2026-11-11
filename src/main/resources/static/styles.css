@@ -7,3 +7,8 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 .player-shell{min-height:200px}
+
+/* Deletion is visually distinct from the primary quiz action. */
+.delete-video { margin-inline-start: .6rem; border: 1px solid #c65e74; color: #e49aad; }
+.delete-video:hover:not(:disabled) { border-color: #e67890; }
+.delete-video:disabled { opacity: .5; cursor: not-allowed; }

@@ -14,6 +14,7 @@ import static edu.videoquiz.core.Models.*;
 public class Gemini {
     private static final String BASE = "https://generativelanguage.googleapis.com";
     private final String key, model;
+    private final ThreadLocal<Consumer<String>> progress=new ThreadLocal<>();
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).followRedirects(HttpClient.Redirect.NEVER).build();
     public Gemini(String key, String model) {
         this.key = Objects.toString(key, ""); this.model = model;
@@ -25,6 +26,7 @@ public class Gemini {
         if(!Double.isFinite(video.duration) || video.duration<=0 || video.duration>1800) throw new IllegalArgumentException("Wait for valid video duration metadata (up to 30 minutes) before analysis.");
         String outputLanguage="ar".equals(video.quizLanguage)?"Arabic":"English";
         String remoteName = null;
+        progress.set(status);
         try {
             JsonObject media = new JsonObject(), data = new JsonObject();
             if (video.kind.equals("YOUTUBE")) data.addProperty("file_uri", "https://www.youtube.com/watch?v=" + video.youtubeId);
@@ -91,6 +93,7 @@ public class Gemini {
                 }
             }
         } finally {
+            progress.remove();
             if (remoteName != null && remoteName.matches("files/[A-Za-z0-9_-]+")) {
                 // Provider-side cleanup is best effort; local retained media is unaffected.
                 try { send(request(BASE+"/v1beta/"+remoteName,4).DELETE().build()); } catch (Exception ignored) {}
@@ -105,31 +108,49 @@ public class Gemini {
         JsonObject body = new JsonObject(); body.add("contents",contents);
         JsonObject config = new JsonObject(); config.addProperty("responseMimeType","application/json"); config.addProperty("temperature",0.15);
         body.add("generationConfig",config);
-        JsonObject response = json(send(request(BASE+"/v1beta/models/"+model+":generateContent",180).header("Content-Type","application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body.toString())).build()).body());
+        String raw = send(request(BASE+"/v1beta/models/"+model+":generateContent",180).header("Content-Type","application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString())).build()).body();
+        JsonObject response;
+        try {response=json(raw);} catch(RuntimeException e) {throw new IOException("AI returned malformed API JSON. Retry analysis or use another video.");}
         try {
             JsonObject candidate = response.getAsJsonArray("candidates").get(0).getAsJsonObject();
-            if (candidate.has("finishReason") && !candidate.get("finishReason").getAsString().equals("STOP")) throw new IllegalArgumentException();
+            if (candidate.has("finishReason") && !candidate.get("finishReason").getAsString().equals("STOP")) {
+                String finish=candidate.get("finishReason").getAsString();
+                throw new IOException("AI generation ended early ("+ (Set.of("SAFETY","RECITATION","MAX_TOKENS").contains(finish)?finish:"INCOMPLETE") +"). Retry or try a shorter video.");
+            }
             StringBuilder output = new StringBuilder();
             for(JsonElement e : candidate.getAsJsonObject("content").getAsJsonArray("parts")) {
                 JsonObject p=e.getAsJsonObject();
                 if(p.has("text") && !(p.has("thought") && p.get("thought").getAsBoolean())) output.append(p.get("text").getAsString());
             }
             return json(output.toString());
-        } catch (Exception e) { throw new IOException("AI returned incomplete, blocked or malformed analysis. Retry analysis."); }
+        } catch (IOException e) { throw e; }
+          catch (Exception e) { throw new IOException("AI returned incomplete or malformed JSON. Retry analysis or use another video."); }
     }
     private JsonObject json(String body) { return JsonParser.parseString(body).getAsJsonObject(); }
     private HttpRequest.Builder request(String url, int seconds) {
         return HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(seconds)).header("x-goog-api-key",key);
     }
     private HttpResponse<String> send(HttpRequest request) throws IOException, InterruptedException {
-        HttpResponse<String> r = client.send(request,HttpResponse.BodyHandlers.ofString());
+        // Retry only read-like Gemini generation POSTs. Do not replay resumable file uploads.
+        boolean generation=request.uri().getPath().endsWith(":generateContent");
+        HttpResponse<String> r;
+        for(int attempt=0;;attempt++) {
+            r=client.send(request,HttpResponse.BodyHandlers.ofString());
+            int code=r.statusCode();
+            boolean transientError=code==408 || code==429 || code==500 || code==502 || code==503 || code==504;
+            if(!generation || !transientError || attempt>=2)break;
+            var callback=progress.get();
+            if(callback!=null)callback.accept("Gemini is temporarily busy (HTTP "+code+"). Retrying automatically ("+(attempt+1)+"/2)…");
+            long backoff= (attempt==0?2000L:4000L) + java.util.concurrent.ThreadLocalRandom.current().nextLong(500);
+            Thread.sleep(backoff);
+        }
         if(r.statusCode()/100 != 2) {
             String cause = switch(r.statusCode()) {
                 case 400 -> "Unsupported or inaccessible video, or incompatible AI model.";
                 case 401,403 -> "AI credentials or permissions were rejected.";
                 case 404 -> "AI model or video was not found. Check GEMINI_MODEL and the video link.";
-                case 429 -> "AI quota is exhausted or the service is rate limiting requests.";
+                case 429 -> "AI rate limit or quota reached. Check Google AI Studio usage and free-tier limits.";
                 default -> "AI service is unavailable.";
             };
             throw new IOException(cause+" (HTTP "+r.statusCode()+"). Your video is retained.");

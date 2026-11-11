@@ -87,6 +87,15 @@ public class Store {
         if (!id.matches("[a-f0-9-]{36}")) throw new IllegalArgumentException("Invalid video ID");
         return root.resolve("media").resolve(id + ".mp4");
     }
+    /** Delete one owned video and its quiz attempts. A caller must confirm irreversible deletion. */
+    public synchronized void deleteVideo(String id, String owner) throws IOException {
+        Video v=video(id,owner);
+        if("PROCESSING".equals(v.status)) throw new IllegalArgumentException("Wait for analysis to finish before deleting this video.");
+        // Delete child records first. Never touch other users' files.
+        for(Attempt a:attempts(owner)) if(id.equals(a.videoId)) Files.deleteIfExists(path("attempts",a.id));
+        Files.deleteIfExists(media(id));
+        Files.delete(path("videos",id));
+    }
     public synchronized void recover() throws IOException {
         for (Video v : videos(null)) if (v.status.equals("PROCESSING")) {
             v.status = "FAILED"; v.message = "Server restarted during analysis. Your video is retained; retry analysis.";
