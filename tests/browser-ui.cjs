@@ -53,7 +53,14 @@ await page.locator('#homeNav').click();await page.evaluate(()=>window.fixtureNev
 await page.locator('#homeNav').click();await page.locator('#file').setInputFiles(path.resolve(__dirname,'fixtures/educational.mp4'));await page.locator('#analyze').click();await page.waitForFunction(()=>!!attempt&&activeVideo?.kind==='LOCAL');assert.ok(video.received>0);await page.waitForFunction(()=>document.querySelector('#video').duration>0);assert.equal(analyses,5);checks.push('Real H.264 MP4 preview, fingerprint, upload and quiz flow with HTTP/Gemini fixtures');
 await page.locator('#historyNav').click();await page.locator('#videosList .delete-video').first().waitFor();
  page.once('dialog',dialog=>dialog.accept());await page.locator('#videosList .delete-video').first().click();
- await page.waitForFunction(()=>document.querySelector('#storageUsage')?.textContent?.includes('0/30 videos'));
+ 
+await page.waitForFunction(() =>
+  document.querySelectorAll('#videosList .delete-video').length === 0 &&
+  /(?:0\/30 videos|0 من 30 فيديو)/.test(
+    document.querySelector('#storageUsage')?.textContent || ''
+  )
+);
+
  assert.equal(await page.locator('#videosList .delete-video').count(),0);assert.equal(await page.locator('#attemptsList .card').count(),0);
  checks.push('Deletion confirmation removes owned video and related history and refreshes quota');
  await page.locator('#logout').click();await page.locator('#auth').waitFor({state:'visible'});checks.push('Logout UI');assert.deepEqual(errors,[]);
