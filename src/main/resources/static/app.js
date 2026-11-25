@@ -1,14 +1,14 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const sections=['auth','home','studio','results','history'];
-let csrf,me,activeVideo,attempt,selectedFile,resumeVideo,blobUrl,yt,ytPromise,pollTimer,clockTimer;
+const sections=['auth','home','studio','results','history','settings'];
+let csrf,me,activeVideo,attempt,selectedFile,resumeVideo,blobUrl,yt,ytPromise,pollTimer,clockTimer,startupReady;
 let shown=new Set(),selections=new Map(),lateness=[],pollGeneration=0;
 let playerGeneration=0,analysisBusy=false,pollFailures=0,ytReady=false,ytFailure=null;
 const settings={youtubeApiMs:60000,youtubePlayerMs:60000,youtubeMetadataMs:60000};
 const loadYouTubeApi=YouTubeLoader.createLoader(window,document);
 function slowVideo(){ $('statusDetail').textContent='YouTube is taking longer than usual. Still connecting; your video link is saved.'; }
 function content(tag,text,cls){const e=element(tag,text,cls);e.dataset.verbatim='';return e;}
-function page(name){$('homeNav').setAttribute('aria-current',name==='home'?'page':'false');$('historyNav').setAttribute('aria-current',name==='history'?'page':'false');for(const id of sections)$(id).hidden=id!==name;$('alert').hidden=true;window.scrollTo({top:0,behavior:'auto'});}
+function page(name){if(name==='auth'){$('settingsNav').hidden=true;$('geminiKey').value='';$('keyFeedback').textContent='';}$('homeNav').setAttribute('aria-current',name==='home'?'page':'false');$('historyNav').setAttribute('aria-current',name==='history'?'page':'false');for(const id of sections)$(id).hidden=id!==name;$('alert').hidden=true;window.scrollTo({top:0,behavior:'auto'});}
 function error(message){$('alert').textContent=message==='Failed to fetch'?'Connection interrupted. Your saved work is retained. Check your connection and retry.':message;$('alert').hidden=false;}
 function formatTime(n){n=Math.max(0,Math.floor(n||0));return `${Math.floor(n/60).toString().padStart(2,'0')}:${(n%60).toString().padStart(2,'0')}`;}
 function element(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
@@ -21,30 +21,80 @@ async function api(path,{method='GET',body,raw=false,timeout=60000}={}){
     const r=await fetch('/api'+path,{method,headers,body:body===undefined?undefined:raw?body:JSON.stringify(body),signal:controller.signal,credentials:'same-origin',cache:'no-store'});
     if(r.status===204)return null;
     const result=await r.json();
-    if(!r.ok){if(r.status===401&&me){me=null;attempt=null;activeVideo=null;historyData=null;dashboardItems=[];stopPolling();resetPlayer();for(const id of ['videosList','attemptsList','review','recentActivity','dashboardStats','historyStats','performance'])$(id).replaceChildren();page('auth');$('logout').hidden=true;$('userLabel').textContent='';}throw Error(result.message||`Request failed (${r.status}).`);}
+    if(!r.ok){if(r.status===401&&me){me=null;attempt=null;activeVideo=null;historyData=null;dashboardItems=[];stopPolling();resetPlayer();for(const id of ['videosList','attemptsList','review','recentActivity','dashboardStats','historyStats','performance'])$(id).replaceChildren();page('auth');$('logout').hidden=true;$('userLabel').textContent='';}throw Object.assign(Error(result.message||`Request failed (${r.status}).`),{providerStatus:result.providerStatus,providerReason:result.providerReason});}
     return result;
   }catch(e){if(e.name==='AbortError')throw Error('The server has not responded within 60 seconds. Check your connection; saved upload chunks and answers are retained.');throw e;}
   finally{clearTimeout(timer);}
 }
+let authMode='login',authBusy=false;
+function setAuthMode(mode){
+  if(authBusy)return;
+  authMode=mode;const create=mode==='register';
+  $('authTitle').textContent=create?'Create your account':'Welcome to VideoQuiz';
+  $('authIntro').textContent=create?'Save your videos, quizzes and progress in your own account.':'Sign in to keep your videos, answers and progress together.';
+  $('authSubmit').textContent=create?'Create Account':'Sign in';
+  $('confirmPasswordGroup').hidden=!create;$('confirmPassword').disabled=!create;$('confirmPassword').required=create;
+  $('password').autocomplete=create?'new-password':'current-password';
+  $('password').value='';$('confirmPassword').value='';
+  $('register').hidden=create;$('authDivider').hidden=create;$('backSignIn').hidden=!create;$('alert').hidden=true;$('authTitle').focus();
+}
 async function signIn(create){
+  if(authBusy)return;
   if(!/^[a-z0-9_]{3,32}$/.test($('username').value)||$('password').value.length<10||new TextEncoder().encode($('password').value).length>72){error('Use a 3–32 character lowercase username and a password of at least 10 characters (maximum 72 UTF-8 bytes).');return;}
+  if(create&&$('password').value!==$('confirmPassword').value){error('Passwords do not match.');$('confirmPassword').focus();return;}
+  authBusy=true;$('authForm').setAttribute('aria-busy','true');
   const buttons=[...$('authForm').querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
   try{
+    // Finish the initial session lookup before creating another CSRF/session request.
+    // Otherwise an eager first submission can race two anonymous session cookies.
+    await startupReady;
+    if(me){signedIn();return;}
     await token();const username=$('username').value,password=$('password').value;
-    if(create)await api('/register',{method:'POST',body:{username,password}});
+    if(create)await api('/register',{method:'POST',body:{username,password,confirmPassword:$('confirmPassword').value}});
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),60000);
     let r;try{r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',[csrf.header]:csrf.token},body:new URLSearchParams({username,password}),credentials:'same-origin',signal:controller.signal});}finally{clearTimeout(timer);}
     if(!r.ok){const body=await r.json();throw Error(body.message||'Could not sign in.');}
-    $('password').value='';await token();me=await api('/me');signedIn();
-  }catch(e){error(e.name==='AbortError'?'Sign-in timed out. Check your connection and retry.':e.message);}finally{buttons.forEach(b=>b.disabled=false);}
+    $('password').value='';$('confirmPassword').value='';await token();me=await api('/me');signedIn();
+  }catch(e){error(e.name==='AbortError'?'Sign-in timed out. Check your connection and retry.':e.message);}finally{authBusy=false;$('authForm').setAttribute('aria-busy','false');buttons.forEach(b=>b.disabled=false);}
 }
-function signedIn(){$('userLabel').textContent=me.username;$('logout').hidden=false;page('home');loadDashboard();if(!me.aiConfigured)error('The server needs GEMINI_API_KEY before analysis can run. Your uploaded files can still be saved.');}
+function signedIn(){$('userLabel').textContent=me.displayName||me.username;$('logout').hidden=false;$('settingsNav').hidden=false;page('home');loadDashboard();updateKeyAccess();}
+function updateKeyAccess(){const configured=!!me?.aiConfigured;$('keyNotice').hidden=configured;$('analyze').disabled=!configured;$('retry').disabled=!configured;}
+let keyBusy=false;
+function paintKeyState(state){
+  me.aiConfigured=state.configured;updateKeyAccess();$('keyStatus').textContent=state.configured?'API Key Configured':'API Key Not Configured';
+  $('geminiKey').value='';$('geminiKey').readOnly=state.configured||!state.available;
+  $('saveKey').hidden=state.configured;$('saveKey').disabled=!state.available;
+  $('replaceKey').hidden=!state.configured;$('replaceKey').disabled=!state.available;$('removeKey').hidden=!state.configured;
+  if(!state.available)$('keyFeedback').textContent='Personal key storage is unavailable. Contact the administrator.';
+}
+async function openKeySettings(){
+  if(!me)return page('auth');stopPolling();pausePlayer();page('settings');$('geminiKey').value='';$('keyFeedback').textContent='';
+  const user=me.username;try{const state=await api('/gemini-key');if(me?.username===user)paintKeyState(state);}catch(e){error(e.message);}
+}
+const settingsNav=element('button','Gemini API Settings','nav');settingsNav.id='settingsNav';settingsNav.hidden=true;$('logout').before(settingsNav);
+settingsNav.onclick=openKeySettings;$('setupKey').onclick=openKeySettings;$('settingsBack').onclick=home;
+$('replaceKey').onclick=()=>{if(keyBusy)return;$('geminiKey').readOnly=false;$('saveKey').hidden=false;$('geminiKey').focus();};
+async function changeKey(remove){
+  if(keyBusy||!me)return;
+  const user=me.username;keyBusy=true;$('keyForm').setAttribute('aria-busy','true');
+  const buttons=[...$('keyForm').querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);$('keyFeedback').textContent='';
+  try{const value=$('geminiKey').value;$('geminiKey').value='';const state=await api('/gemini-key',{method:remove?'DELETE':'PUT',body:remove?undefined:{key:value}});if(me?.username===user){paintKeyState(state);$('keyFeedback').textContent=remove?'API key removed. Your saved quizzes and history are unchanged.':'Verification Successful';}}
+  catch(e){if(me?.username===user){
+    $('keyFeedback').replaceChildren(element('span',e.message));
+    if(Number.isInteger(e.providerStatus)&&e.providerStatus>=100&&e.providerStatus<=599&&/^[A-Z_]{1,64}$/.test(e.providerReason||'')){
+      const detail=content('bdi',`HTTP ${e.providerStatus} · ${e.providerReason}`);detail.dir='ltr';
+      $('keyFeedback').append(element('br'),element('span','Google verification details: '),detail);
+    }
+  }}
+  finally{keyBusy=false;$('keyForm').setAttribute('aria-busy','false');buttons.forEach(b=>b.disabled=false);}
+}
+$('keyForm').onsubmit=e=>{e.preventDefault();changeKey(false);};$('removeKey').onclick=()=>changeKey(true);
 $('authForm').noValidate=true;
-$('authForm').addEventListener('submit',e=>{e.preventDefault();signIn(false);});$('register').onclick=()=>signIn(true);
+$('authForm').addEventListener('submit',e=>{e.preventDefault();signIn(authMode==='register');});$('register').onclick=()=>setAuthMode('register');$('backSignIn').onclick=()=>setAuthMode('login');
 $('logout').onclick=async()=>{try{await api('/logout',{method:'POST'});stopPolling();resetPlayer();attempt=null;activeVideo=null;selectedFile=null;resumeVideo=null;me=null;historyData=null;dashboardItems=[];for(const id of ['videosList','attemptsList','review','recentActivity','dashboardStats','historyStats','performance'])$(id).replaceChildren();$('file').value='';$('url').value='';$('userLabel').textContent='';$('logout').hidden=true;page('auth');await token();}catch(e){error(e.message);}};
 function home(){if(!me)return page('auth');stopPolling();pausePlayer();resumeVideo=null;page('home');loadDashboard();}
 for(const id of ['homeNav','backHome','historyNew'])$(id).onclick=home;
-$('historyNav').onclick=history;
+$('historyNav').onclick=openHistory;
 document.querySelector('.brand').onclick=e=>{e.preventDefault();home();};
 $('file').onchange=()=>{selectedFile=$('file').files[0];if(selectedFile){$('fileName').textContent=selectedFile.name;$('url').value='';}};
 $('url').oninput=()=>{selectedFile=null;resumeVideo=null;$('file').value='';$('fileName').textContent='Choose a video file';};
@@ -98,6 +148,7 @@ async function poll(id,generation){
 function watchJob(id){stopPolling();pollFailures=0;poll(id,pollGeneration);}
 async function fingerprint(file){const hash=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());return [...new Uint8Array(hash)].map(n=>n.toString(16).padStart(2,'0')).join('');}
 $('analyze').onclick=async()=>{
+  if(!me?.aiConfigured)return openKeySettings();
   const file=selectedFile,url=$('url').value.trim();
   if(!file&&!youtubeId(url))return error('Choose an MP4 video or enter a valid public HTTPS YouTube link.');
   if(file&&(!file.name.toLowerCase().endsWith('.mp4')||file.size<32||file.size>256*1024*1024))return error('Choose an MP4 video between 32 bytes and 256 MiB.');
@@ -114,10 +165,11 @@ $('analyze').onclick=async()=>{
     }else{const v=await api('/links',{method:'POST',body:{url}});status(v);await player(v);}
     await startAnalysis();
   }catch(e){error(e.message);if(activeVideo){$('retry').hidden=!['UPLOADED','FAILED'].includes(activeVideo.status);if(activeVideo.status==='UPLOADING'){$('stage').textContent='Upload paused';$('statusDetail').textContent='Open My learning, choose Resume upload, and reselect the same file to continue.';}}}
-  finally{$('analyze').disabled=false;}
+  finally{updateKeyAccess();}
 };
 async function startAnalysis(){
   if(!activeVideo||analysisBusy)return;
+  if(!['PROCESSING','READY'].includes(activeVideo.status)&&!me?.aiConfigured)return openKeySettings();
   analysisBusy=true;$('retry').disabled=true;const id=activeVideo.id;
   try{
     $('alert').hidden=true;
@@ -136,7 +188,7 @@ async function startAnalysis(){
     try{const saved=await api('/videos/'+id);if(activeVideo?.id!==id)return;status(saved);if(['PROCESSING','READY'].includes(saved.status))watchJob(id);}catch{
       $('stage').textContent='Connection interrupted';$('statusDetail').textContent='Reconnecting to your saved analysis...';watchJob(id);
     }
-  }finally{analysisBusy=false;$('retry').disabled=false;}
+  }finally{analysisBusy=false;updateKeyAccess();}
 }
 $('retry').onclick=()=>startAnalysis();
 async function beginAttempt(existing){
@@ -209,7 +261,7 @@ function stats(items,target){
 function renderDashboard(items){dashboardItems=items;stats(items,'dashboardStats');$('recentActivity').replaceChildren();if(!items.length)$('recentActivity').append(element('p','Your learning journey starts with your first video.','empty'));
   for(const a of items.slice(0,3)){const row=element('div',undefined,'recent-row'),info=element('div');info.append(content('strong',a.title),element('small',`${a.score}/${a.total} correct · ${I18n.date(a.created)}`));const button=element('button','Review','secondary');button.onclick=()=>showResults(a.id);row.append(info,button);$('recentActivity').append(row);}}
 async function loadDashboard(){const user=me?.username;if(!user)return;try{const items=await api('/attempts');if(me?.username===user)renderDashboard(items);}catch(e){$('recentActivity').textContent='Progress could not be loaded. Open My Quizzes to retry.';}}
-async function history(){if(!me)return page('auth');stopPolling();pausePlayer();page('history');historyData=null;historyLimit=12;$('videosList').textContent='Loading your videos…';$('attemptsList').textContent='Loading your attempts…';const user=me.username;try{const [videos,attempts]=await Promise.all([api('/videos'),api('/attempts')]);if(me?.username!==user)return;historyData={videos,attempts:attempts.sort((a,b)=>b.created-a.created)};renderHistory();}catch(e){error(e.message);}}
+async function openHistory(){if(!me)return page('auth');stopPolling();pausePlayer();page('history');historyData=null;historyLimit=12;$('videosList').textContent='Loading your videos…';$('attemptsList').textContent='Loading your attempts…';const user=me.username;try{const [videos,attempts]=await Promise.all([api('/videos'),api('/attempts')]);if(me?.username!==user)return;historyData={videos,attempts:attempts.sort((a,b)=>b.created-a.created)};renderHistory();}catch(e){error(e.message);}}
 function renderHistory(){
   if(!historyData)return;const {videos,attempts}=historyData;stats(attempts,'historyStats');renderDashboard(attempts);$('videosList').replaceChildren();$('attemptsList').replaceChildren();$('performance').replaceChildren();
   const count=videos.length,bytes=videos.reduce((n,v)=>n+(v.size||0),0);
@@ -243,4 +295,6 @@ drop.addEventListener('drop',e=>{const files=e.dataTransfer.files;if(files.lengt
 window.addEventListener('videoquiz-language',()=>{if(historyData)renderHistory();else if(me)renderDashboard(dashboardItems);if(attempt&&!$('results').hidden)renderResults();});
 // Exposes measured render times only, without answers or credentials, for acceptance testing.
 window.videoQuizTiming=()=>lateness.map(x=>({...x}));
-(async()=>{try{Object.assign(settings,await api('/settings'));await token();try{me=await api('/me');signedIn();}catch{page('auth');}}catch(e){page('auth');error(e.message);}})();
+startupReady=(async()=>{try{Object.assign(settings,await api('/settings'));$('googleSignIn').hidden=!settings.googleSignInEnabled;await token();try{me=await api('/me');signedIn();}catch{page('auth');}
+  if(new URLSearchParams(location.search).get('auth')==='google-failed'){error('Google sign-in was cancelled or could not be completed. Try again or sign in with your username.');window.history.replaceState(null,'','/');}
+}catch(e){page('auth');error(e.message);}})();

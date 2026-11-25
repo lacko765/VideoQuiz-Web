@@ -21,8 +21,105 @@ public class Gemini {
         if (!model.matches("[A-Za-z0-9._-]+")) throw new IllegalArgumentException("Invalid GEMINI_MODEL");
     }
     public boolean configured() { return !key.isBlank(); }
+    public static final class KeyFailure extends IOException {
+        public final String code;
+        public final int httpStatus;
+        public final Integer providerStatus;
+        public final String providerReason;
+        public KeyFailure(String code, String message, int httpStatus) {
+            this(code,message,httpStatus,null,null);
+        }
+        private KeyFailure(String code, String message, int httpStatus, Integer providerStatus, String providerReason) {
+            super(message); this.code=code; this.httpStatus=httpStatus;
+            this.providerStatus=providerStatus; this.providerReason=providerReason;
+        }
+    }
+    // Only known Google enums may cross the trust boundary. Never expose provider
+    // messages, metadata, unknown reasons or exception causes: they can echo keys.
+    private static final Set<String> SAFE_REASONS=Set.of(
+        "API_KEY_INVALID","API_KEY_EXPIRED","API_KEY_SERVICE_BLOCKED","API_KEY_HTTP_REFERRER_BLOCKED",
+        "API_KEY_IP_ADDRESS_BLOCKED","API_KEY_ANDROID_APP_BLOCKED","API_KEY_IOS_APP_BLOCKED",
+        "SERVICE_DISABLED","BILLING_DISABLED","CONSUMER_INVALID","PROJECT_DELETED","PROJECT_INVALID",
+        "IAM_PERMISSION_DENIED","ACCESS_TOKEN_SCOPE_INSUFFICIENT","ACCESS_TOKEN_TYPE_UNSUPPORTED",
+        "ACCESS_TOKEN_EXPIRED","CREDENTIALS_MISSING","SECURITY_POLICY_VIOLATED",
+        "RATE_LIMIT_EXCEEDED","QUOTA_EXCEEDED");
+    private static final Set<String> SAFE_STATUSES=Set.of(
+        "INVALID_ARGUMENT","UNAUTHENTICATED","PERMISSION_DENIED","NOT_FOUND","RESOURCE_EXHAUSTED",
+        "FAILED_PRECONDITION","INTERNAL","UNAVAILABLE","DEADLINE_EXCEEDED","UNKNOWN",
+        "CANCELLED","OUT_OF_RANGE","UNIMPLEMENTED","DATA_LOSS","ABORTED","ALREADY_EXISTS");
+    private static String providerReason(String body) {
+        try {
+            JsonObject error=JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("error");
+            if(error==null)return "UNRECOGNIZED_ERROR";
+            if(error.get("details") instanceof JsonArray details)for(JsonElement value:details) {
+                if(!(value instanceof JsonObject detail))continue;
+                if("type.googleapis.com/google.rpc.ErrorInfo".equals(string(detail,"@type"))) {
+                    String reason=string(detail,"reason");
+                    if(SAFE_REASONS.contains(reason))return reason;
+                }
+            }
+            String status=string(error,"status");
+            if(SAFE_STATUSES.contains(status))return status;
+        } catch(RuntimeException ignored) { /* Untrusted or non-JSON provider error. */ }
+        return "UNRECOGNIZED_ERROR";
+    }
+    private static String string(JsonObject object,String name) {
+        JsonElement value=object.get(name);
+        return value instanceof JsonPrimitive p && p.isString()?p.getAsString():"";
+    }
+    private static KeyFailure verificationFailure(int status,String body) {
+        String reason=providerReason(body);
+        if(status==408 || status==504 || reason.equals("DEADLINE_EXCEEDED"))
+            return new KeyFailure("VERIFICATION_TIMEOUT","Gemini verification timed out. Retry shortly.",504,status,reason);
+        if(status>=500)
+            return new KeyFailure("SERVICE_UNAVAILABLE","Gemini Service Unavailable",503,status,reason);
+        if(status==429 || Set.of("RESOURCE_EXHAUSTED","RATE_LIMIT_EXCEEDED","QUOTA_EXCEEDED").contains(reason))
+            return new KeyFailure("QUOTA_EXCEEDED","Quota Exceeded",429,status,reason);
+        if(status==402)
+            return new KeyFailure("BILLING_REQUIRED","Google requires billing or available credits for this project. Check Google AI Studio billing.",402,status,reason);
+        if(reason.equals("API_KEY_INVALID") || reason.equals("API_KEY_EXPIRED"))
+            return new KeyFailure("INVALID_KEY","Google rejected this API key as invalid or expired. Copy a current key from Google AI Studio.",400,status,reason);
+        if(status==403 || Set.of("PERMISSION_DENIED","API_KEY_SERVICE_BLOCKED","API_KEY_HTTP_REFERRER_BLOCKED",
+            "API_KEY_IP_ADDRESS_BLOCKED","API_KEY_ANDROID_APP_BLOCKED","API_KEY_IOS_APP_BLOCKED",
+            "SERVICE_DISABLED","BILLING_DISABLED","CONSUMER_INVALID","PROJECT_DELETED","PROJECT_INVALID",
+            "IAM_PERMISSION_DENIED","ACCESS_TOKEN_SCOPE_INSUFFICIENT","SECURITY_POLICY_VIOLATED").contains(reason))
+            return new KeyFailure("PERMISSION_DENIED","Google denied access. Check the key restrictions, Generative Language API access and project permissions in Google AI Studio or Google Cloud.",403,status,reason);
+        if(status==401 || Set.of("UNAUTHENTICATED","ACCESS_TOKEN_TYPE_UNSUPPORTED","ACCESS_TOKEN_EXPIRED","CREDENTIALS_MISSING").contains(reason))
+            return new KeyFailure("AUTHENTICATION_FAILED","Google could not authenticate this key. Check the complete key and its project configuration in Google AI Studio.",400,status,reason);
+        if(status==404 || reason.equals("NOT_FOUND"))
+            return new KeyFailure("MODEL_UNAVAILABLE","The configured Gemini model is unavailable to this key. Contact the administrator.",422,status,reason);
+        if(status==400 || Set.of("INVALID_ARGUMENT","FAILED_PRECONDITION").contains(reason))
+            return new KeyFailure("VERIFICATION_REJECTED","Google rejected the verification request. Check the project setup and configured Gemini model; this does not necessarily mean the key is invalid.",422,status,reason);
+        return new KeyFailure("SERVICE_UNAVAILABLE","Gemini Service Unavailable",503,status,reason);
+    }
+    /** Reads model metadata only. No content generation or video upload during verification. */
+    public void verifyKey() throws KeyFailure {
+        try {
+            var response=exchange(request(BASE+"/v1beta/models/"+model,20).GET().build());
+            int code=response.statusCode();
+            if(code/100!=2) throw verificationFailure(code,response.body());
+            JsonObject metadata;
+            try {
+                metadata=json(response.body());
+                // A model alias may resolve to a canonical model name.
+                if(!string(metadata,"name").startsWith("models/") || string(metadata,"name").length()<=7 ||
+                   !(metadata.get("supportedGenerationMethods") instanceof JsonArray))throw new IllegalStateException();
+            } catch(RuntimeException e) {
+                throw new KeyFailure("INVALID_RESPONSE","Gemini returned an unexpected verification response. Retry shortly.",502,code,"INVALID_RESPONSE");
+            }
+            if(!metadata.getAsJsonArray("supportedGenerationMethods").contains(new JsonPrimitive("generateContent")))
+                throw new KeyFailure("MODEL_UNAVAILABLE","The configured Gemini model is unavailable to this key. Contact the administrator.",422,code,"MODEL_UNSUPPORTED");
+        } catch(KeyFailure e) { throw e; }
+        catch(HttpTimeoutException e) { throw new KeyFailure("VERIFICATION_TIMEOUT","Gemini verification timed out. Retry shortly.",504); }
+        catch(InterruptedException e) { Thread.currentThread().interrupt(); throw new KeyFailure("VERIFICATION_INTERRUPTED","Gemini verification was interrupted. Retry shortly.",503); }
+        catch(IOException e) { throw new KeyFailure("NETWORK_ERROR","Could not reach Google Gemini. Check the server network connection and retry.",503); }
+        catch(Exception e) { throw new KeyFailure("SERVICE_UNAVAILABLE","Gemini Service Unavailable",503); }
+    }
+    protected HttpResponse<String> exchange(HttpRequest request) throws IOException, InterruptedException {
+        return client.send(request,HttpResponse.BodyHandlers.ofString());
+    }
     public void analyze(Video video, Path local, Consumer<String> status) throws Exception {
-        if (!configured()) throw new IllegalArgumentException("GEMINI_API_KEY is not configured on the server. Set it and retry; your video is retained.");
+        if (!configured()) throw new IllegalArgumentException("Configure your personal Gemini API key in Gemini API Settings before analysis.");
         if(!Double.isFinite(video.duration) || video.duration<=0 || video.duration>1800) throw new IllegalArgumentException("Wait for valid video duration metadata (up to 30 minutes) before analysis.");
         String outputLanguage="ar".equals(video.quizLanguage)?"Arabic":"English";
         String remoteName = null;
@@ -136,7 +233,7 @@ public class Gemini {
         boolean generation=request.uri().getPath().endsWith(":generateContent");
         HttpResponse<String> r;
         for(int attempt=0;;attempt++) {
-            r=client.send(request,HttpResponse.BodyHandlers.ofString());
+            r=exchange(request);
             int code=r.statusCode();
             boolean transientError=code==408 || code==429 || code==500 || code==502 || code==503 || code==504;
             if(!generation || !transientError || attempt>=2)break;
@@ -148,7 +245,7 @@ public class Gemini {
         if(r.statusCode()/100 != 2) {
             String cause = switch(r.statusCode()) {
                 case 400 -> "Unsupported or inaccessible video, or incompatible AI model.";
-                case 401,403 -> "AI credentials or permissions were rejected.";
+                case 401,403 -> "Your Gemini API key or permissions were rejected. Replace your key in Gemini API Settings.";
                 case 404 -> "AI model or video was not found. Check GEMINI_MODEL and the video link.";
                 case 429 -> "AI rate limit or quota reached. Check Google AI Studio usage and free-tier limits.";
                 default -> "AI service is unavailable.";

@@ -23,7 +23,16 @@ public final class Models {
         public long created = System.currentTimeMillis();
         public Map<Integer, Integer> answers = new TreeMap<>();
     }
-    public record Account(String username, String passwordHash) {}
+    public record Account(String username, String passwordHash, String googleSubject) {
+        public Account(String username, String passwordHash) { this(username,passwordHash,null); }
+        @Override public String toString() { return "Account[credentials redacted]"; }
+    }
+    public static class GeminiKey {
+        public transient long revision;
+        public String encrypted;
+        public GeminiKey(String encrypted) { this.encrypted = encrypted; }
+        @Override public String toString() { return "GeminiKey[redacted]"; }
+    }
     public record Feedback(int questionIndex, int selectedIndex, int correctIndex, boolean correct,
                            String explanation, int score, int answered, int total) {}
 }

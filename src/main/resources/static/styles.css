@@ -12,3 +12,19 @@
 .delete-video { margin-inline-start: .6rem; border: 1px solid #c65e74; color: #e49aad; }
 .delete-video:hover:not(:disabled) { border-color: #e67890; }
 .delete-video:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Personal credentials share the existing card and button design. */
+.key-settings { max-width: 820px; margin-inline: auto; }
+.key-guide { margin-block: 1rem 1.5rem; padding: clamp(1rem,3vw,1.5rem); border: 1px solid var(--line); border-radius: 16px; }
+.key-guide h2 { font-size: 1.2rem; }
+.key-guide li { margin-block: .5rem; line-height: 1.6; }
+.key-guide ol { padding-inline-start: 1.4rem; }
+.external-link { display: inline-block; text-decoration: none; margin-block: .5rem; }
+.key-actions, .key-notice { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+.key-notice { border: 1px solid var(--line); border-radius: 16px; padding: 1rem; margin-block-end: 1rem; }
+.key-notice p { flex: 1 1 260px; margin: 0; }
+#keyFeedback { overflow-wrap: anywhere; }
+.google-button { display:flex; align-items:center; justify-content:center; gap:12px; width:100%; min-height:44px; padding:10px 12px; border:1px solid #747775; border-radius:4px; background:#fff; color:#1f1f1f; font:500 14px/1.4 'Segoe UI',Arial,sans-serif; text-decoration:none; }
+.google-button svg { flex:none; }
+.google-button:hover { background:#f2f2f2; }
+#googleSignIn .hint { margin-block:12px 0; }

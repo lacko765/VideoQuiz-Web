@@ -31,7 +31,13 @@ await route.fulfill({status:code,contentType:'application/json',body:code===204?
 await page.route('https://www.youtube.com/iframe_api',route=>route.fulfill({contentType:'text/javascript',body:`setTimeout(()=>{window.YT={Player:class{constructor(id,o){this.time=0;this.duration=0;this.node=document.getElementById(id);this.node.textContent='YouTube test player';this.node.style.color='white';window.fixturePlayer=this;if(window.fixtureNeverReady)return;setTimeout(()=>{o.events.onReady({target:this});setTimeout(()=>{if(!window.fixtureNeverMetadata)this.duration=30},15000);},25000);}getDuration(){return this.duration}getCurrentTime(){return this.time}mute(){}playVideo(){}pauseVideo(){}seekTo(t){this.time=t}destroy(){this.node.remove()}}};window.onYouTubeIframeAPIReady();},15000);`}));
 try{
 await page.goto(base);await page.locator('#auth').waitFor({state:'visible'});await page.screenshot({path:path.join(out,'auth-desktop.png'),fullPage:true});
-await page.locator('#username').fill('student');await page.locator('#password').fill('fixture-password');await page.locator('#register').click();await page.locator('#home').waitFor({state:'visible'});checks.push('Registration/login UI with HTTP fixtures');
+await page.locator('#register').click();
+await page.locator('#username').fill('student');
+await page.locator('#password').fill('fixture-password');
+await page.locator('#confirmPassword').fill('fixture-password');
+await page.locator('#authSubmit').click();
+await page.locator('#home').waitFor({state:'visible'});
+checks.push('Registration/login UI with HTTP fixtures');
 await page.locator('#language').selectOption('ar');await page.waitForFunction(()=>document.documentElement.dir==='rtl');assert.equal(await page.locator('#historyNav').innerText(),'اختباراتي السابقة');await page.locator('#theme').click();await page.screenshot({path:path.join(out,'dashboard-ar-dark.png'),fullPage:true});
 await page.reload();await page.locator('#home').waitFor({state:'visible'});assert.equal(await page.locator('html').getAttribute('lang'),'ar');assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');checks.push('Arabic RTL and theme preferences survive refresh');
 await page.locator('#language').selectOption('en');await page.locator('#theme').click();await page.clock.install();await page.locator('#url').fill('https://youtu.be/tVHOBVAFjUw');await page.locator('#analyze').click();await page.waitForFunction(()=>document.querySelector('script[data-videoquiz]'));

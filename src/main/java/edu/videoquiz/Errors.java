@@ -8,6 +8,11 @@ import java.io.IOException;
 
 @RestControllerAdvice
 public class Errors {
+    @ExceptionHandler(edu.videoquiz.core.Gemini.KeyFailure.class) ResponseEntity<?> key(edu.videoquiz.core.Gemini.KeyFailure e) {
+        Map<String,Object> body=new LinkedHashMap<>();body.put("code",e.code);body.put("message",e.getMessage());
+        if(e.providerStatus!=null){body.put("providerStatus",e.providerStatus);body.put("providerReason",e.providerReason);}
+        return ResponseEntity.status(e.httpStatus).body(body);
+    }
     @ExceptionHandler(IllegalArgumentException.class) ResponseEntity<?> invalid(IllegalArgumentException e) { return ResponseEntity.badRequest().body(Map.of("message",Objects.toString(e.getMessage(),"Invalid input."))); }
     @ExceptionHandler(NoSuchElementException.class) ResponseEntity<?> missing() { return ResponseEntity.status(404).body(Map.of("message","Item not found.")); }
     @ExceptionHandler(HttpMessageNotReadableException.class) ResponseEntity<?> malformed() { return ResponseEntity.badRequest().body(Map.of("message","The request contains invalid or missing fields.")); }

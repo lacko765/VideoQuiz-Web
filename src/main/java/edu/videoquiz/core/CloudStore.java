@@ -58,6 +58,7 @@ public class CloudStore extends Store implements AutoCloseable {
         T value=gson.fromJson(rows.getString(1),type);
         if(value instanceof Video v) v.revision=rows.getLong(2);
         if(value instanceof Attempt a) a.revision=rows.getLong(2);
+        if(value instanceof GeminiKey k) k.revision=rows.getLong(2);
         return value;
     }
     private <T> List<T> list(String kind,String owner,Class<T> type) throws IOException {
@@ -78,6 +79,23 @@ public class CloudStore extends Store implements AutoCloseable {
         try(var p=db.createStatement();var rows=p.executeQuery("SELECT COUNT(*) FROM videoquiz_private.records WHERE kind='accounts'")){rows.next();return rows.getLong(1);}catch(SQLException e){throw failure();}
     }
     @Override public synchronized Account account(String username) throws IOException {return read("accounts",username,username,Account.class);}
+    @Override protected void createGoogleAccount(Account account) throws IOException {
+        write("accounts",account.username(),account.username(),account,0);
+    }
+    @Override public synchronized GeminiKey geminiKey(String owner) throws IOException {
+        try { return read("gemini_keys",owner,owner,GeminiKey.class); }
+        catch (NoSuchElementException e) { return null; }
+    }
+    @Override public synchronized void saveGeminiKey(String owner,String encrypted) throws IOException {
+        account(owner); GeminiKey previous=geminiKey(owner);
+        write("gemini_keys",owner,owner,new GeminiKey(encrypted),previous==null?0:previous.revision);
+    }
+    @Override public synchronized void removeGeminiKey(String owner) throws IOException {
+        validate(owner);
+        try(var p=db.prepareStatement("DELETE FROM videoquiz_private.records WHERE kind='gemini_keys' AND id=? AND owner=?")) {
+            p.setString(1,owner);p.setString(2,owner);p.executeUpdate();
+        } catch(SQLException e) {throw failure();}
+    }
     @Override public synchronized void register(String username,String hash) throws IOException {
         if(!username.matches("[a-z0-9_]{3,32}")) throw new IllegalArgumentException("Invalid username");
         try {account(username);throw new IllegalArgumentException("Username is already registered.");}catch(NoSuchElementException ignored){}
