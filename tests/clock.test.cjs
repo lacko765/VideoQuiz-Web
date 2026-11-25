@@ -34,7 +34,7 @@ test('timer advances during analysis before an attempt exists',()=>{
 test('retry recovers a lost POST response by polling the saved job',async()=>{
   const controls={retry:{},alert:{},stage:{},statusDetail:{},quizLanguage:{value:'en'}};
   const calls=[];let watching;
-  const context={activeVideo:{id:'saved',kind:'LOCAL',duration:42},analysisBusy:false,
+  const context={activeVideo:{id:'saved',kind:'LOCAL',duration:42},analysisBusy:false,me:{aiConfigured:true},updateKeyAccess:()=>{},
     $:id=>controls[id],error:()=>{},status:v=>{context.activeVideo=v;},watchJob:id=>{watching=id;},
     api:async(path,options)=>{calls.push({path,options});if(options)throw Error('timeout');return {id:'saved',status:'PROCESSING'};}
   };
@@ -46,7 +46,7 @@ test('retry recovers a lost POST response by polling the saved job',async()=>{
 
 test('repeated retry clicks send only one analysis POST',async()=>{
   const controls={retry:{},alert:{},stage:{},statusDetail:{},quizLanguage:{value:'en'}};let release,posts=0;
-  const context={activeVideo:{id:'saved',kind:'LOCAL',duration:42},analysisBusy:false,
+  const context={activeVideo:{id:'saved',kind:'LOCAL',duration:42},analysisBusy:false,me:{aiConfigured:true},updateKeyAccess:()=>{},
     $:id=>controls[id],error:()=>{},status:()=>{},watchJob:()=>{},
     api:()=>{posts++;return new Promise(resolve=>{release=resolve;});}
   };
