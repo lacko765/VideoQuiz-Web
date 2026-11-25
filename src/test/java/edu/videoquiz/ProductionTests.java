@@ -11,14 +11,15 @@ import java.net.URI;
 import java.net.http.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties={"spring.profiles.active=prod","videoquiz.google-client-id=","videoquiz.google-client-secret=","videoquiz.key-encryption-key="})
 @ActiveProfiles("prod")
 class ProductionTests {
     static final Path root;
     static {try {root=Files.createTempDirectory("videoquiz-prod-test");}catch(Exception e){throw new ExceptionInInitializerError(e);}}
     @DynamicPropertySource static void properties(DynamicPropertyRegistry r) {
         r.add("videoquiz.data-dir",root::toString);
-        r.add("videoquiz.gemini-key",()->"test-fixture-no-api-calls");
+
     }
     @LocalServerPort int port;
     final HttpClient client=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
@@ -36,8 +37,8 @@ class ProductionTests {
         assertTrue(cookie.contains("Secure"));assertTrue(cookie.contains("HttpOnly"));
     }
     @Test void anonymousPrivateApiStillRejected() throws Exception {assertEquals(401,get("/api/videos",true).statusCode());}
-    @Test void missingKeyAndDuplicateWriterRejected() throws Exception {
-        assertThrows(IllegalStateException.class,()->new ProductionStorage(root.toString(),""));
-        assertThrows(Exception.class,()->new ProductionStorage(root.toString(),"test"));
+    @Test void missingStorageAndDuplicateWriterRejected() throws Exception {
+        assertThrows(IllegalStateException.class,()->new ProductionStorage(root.resolve("missing").toString()));
+        assertThrows(Exception.class,()->new ProductionStorage(root.toString()));
     }
 }

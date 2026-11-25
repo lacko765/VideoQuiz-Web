@@ -18,12 +18,14 @@ import java.util.*;
 public class Api {
     static final long MAX_VIDEO=256L*1024*1024, MAX_USER=1024L*1024*1024;
     static final int CHUNK=1024*1024;
-    private final Store store; private final Jobs jobs; private final PasswordEncoder passwords; private final Gemini gemini;
+    private final Store store; private final Jobs jobs; private final PasswordEncoder passwords; private final PersonalKeys keys;
     @org.springframework.beans.factory.annotation.Value("${videoquiz.total-storage-bytes:0}") private long totalStorage;
     @org.springframework.beans.factory.annotation.Value("${videoquiz.storage-reserve-bytes:0}") private long reserve;
     @org.springframework.beans.factory.annotation.Value("${videoquiz.max-accounts:0}") private long maxAccounts;
-    public Api(Store store,Jobs jobs,PasswordEncoder passwords,Gemini gemini) { this.store=store; this.jobs=jobs; this.passwords=passwords; this.gemini=gemini; }
-    public record Credentials(String username,String password) {}
+    public Api(Store store,Jobs jobs,PasswordEncoder passwords,PersonalKeys keys) { this.store=store; this.jobs=jobs; this.passwords=passwords; this.keys=keys; }
+    public record Credentials(String username,String password,String confirmPassword) {
+        @Override public String toString() { return "Credentials[redacted]"; }
+    }
     public record Upload(String name,long size,String sha256) {}
     public record Link(String url) {}
     public record Selection(Integer questionIndex,Integer optionIndex) {}
@@ -33,6 +35,7 @@ public class Api {
     @PostMapping("/register") public Map<String,Boolean> register(@RequestBody Credentials c) throws IOException {
         if(c.username()==null || !c.username().matches("[a-z0-9_]{3,32}") || c.password()==null || c.password().length()<10 || c.password().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>72)
             throw new IllegalArgumentException("Use a 3–32 character lowercase username and a password of at least 10 characters (maximum 72 UTF-8 bytes).");
+        if(!c.password().equals(c.confirmPassword())) throw new IllegalArgumentException("Passwords do not match.");
         String hash=passwords.encode(c.password());
         synchronized(store) {
             if(maxAccounts>0 && store.accountCount()>=maxAccounts) throw new IllegalArgumentException("This demonstration has reached its account limit. Contact the website owner.");
@@ -40,7 +43,16 @@ public class Api {
         }
         return Map.of("ok",true);
     }
-    @GetMapping("/me") public Map<String,Object> me(Principal p) { return Map.of("username",p.getName(),"aiConfigured",gemini.configured()); }
+    @GetMapping("/me") public Map<String,Object> me(Principal p) throws IOException {
+        String displayName=p.getName();
+        if(p instanceof org.springframework.security.core.Authentication a && a.getPrincipal() instanceof org.springframework.security.oauth2.core.oidc.user.OidcUser u)
+            displayName=u.getFullName()==null?"Google account":u.getFullName();
+        return Map.of("username",p.getName(),"displayName",displayName,"aiConfigured",keys.status(p.getName()).configured());
+    }
+    public record KeyInput(String key) { @Override public String toString() { return "KeyInput[redacted]"; } }
+    @GetMapping("/gemini-key") public PersonalKeys.Status keyStatus(Principal p) throws IOException { return keys.status(p.getName()); }
+    @PutMapping("/gemini-key") public PersonalKeys.Status saveKey(@RequestBody KeyInput input,Principal p) throws IOException { return keys.save(p.getName(),input.key()); }
+    @DeleteMapping("/gemini-key") public PersonalKeys.Status removeKey(Principal p) throws IOException { return keys.remove(p.getName()); }
     private void quota(String owner,long newSize) throws IOException {
         List<Video> videos=store.videos(owner);
         if(videos.size()>=30 || videos.stream().mapToLong(v -> v.size).sum()+newSize>MAX_USER) throw new IllegalArgumentException("Your storage limit is reached (30 videos / 1 GiB). Open My Quizzes to delete an unused video and its attempts.");

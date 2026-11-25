@@ -12,9 +12,7 @@ import java.nio.channels.*;
 public class ProductionStorage implements DisposableBean {
     private final FileChannel channel;
     private final FileLock lock;
-    public ProductionStorage(@Value("${videoquiz.data-dir}") String directory,
-                             @Value("${videoquiz.gemini-key}") String key) throws Exception {
-        if(key.isBlank()) throw new IllegalStateException("Set GEMINI_API_KEY in the hosting platform's secret variables.");
+    public ProductionStorage(@Value("${videoquiz.data-dir}") String directory) throws Exception {
         Path root=Path.of(directory).normalize();
         if(!root.isAbsolute() || !Files.isDirectory(root) || !Files.isWritable(root))
             throw new IllegalStateException("Mount a writable persistent volume and set VIDEOQUIZ_DATA_DIR to its absolute path.");

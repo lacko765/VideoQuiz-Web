@@ -12,7 +12,7 @@ public class Store {
     private final Gson gson = new Gson();
     public Store(Path root) throws IOException {
         this.root = root.toAbsolutePath().normalize();
-        for (String dir : List.of("videos", "attempts", "accounts", "media")) Files.createDirectories(this.root.resolve(dir));
+        for (String dir : List.of("videos", "attempts", "accounts", "media", "gemini_keys")) Files.createDirectories(this.root.resolve(dir));
     }
     public static String id() { return UUID.randomUUID().toString(); }
     public void initializeMedia(Video v) throws IOException { Files.createFile(media(v.id)); }
@@ -83,6 +83,34 @@ public class Store {
         write("accounts", username, new Account(username, hash));
     }
     public synchronized Account account(String username) throws IOException { return read("accounts", username, Account.class); }
+    /** Reserved identity namespace cannot be registered through the local username form. */
+    public static String googleUsername(String subject) {
+        if(subject==null || subject.isBlank() || subject.length()>255) throw new IllegalArgumentException("Invalid Google identity.");
+        try {
+            var hash=java.security.MessageDigest.getInstance("SHA-256").digest(("https://accounts.google.com\u0000"+subject).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return "google-"+HexFormat.of().formatHex(hash);
+        } catch(java.security.NoSuchAlgorithmException e) {throw new IllegalStateException("Identity hashing is unavailable.");}
+    }
+    public synchronized Account googleAccount(String subject,long maxAccounts) throws IOException {
+        String username=googleUsername(subject);
+        try {
+            Account existing=account(username);
+            if(!subject.equals(existing.googleSubject()) || existing.passwordHash()!=null) throw new IOException("Google identity conflict.");
+            return existing;
+        } catch(NoSuchElementException absent) {
+            if(maxAccounts>0 && accountCount()>=maxAccounts) throw new IOException("Account limit reached.");
+            Account created=new Account(username,null,subject);createGoogleAccount(created);return created;
+        }
+    }
+    protected void createGoogleAccount(Account account) throws IOException { write("accounts",account.username(),account); }
+    public synchronized GeminiKey geminiKey(String owner) throws IOException {
+        try { return read("gemini_keys", owner, GeminiKey.class); }
+        catch (NoSuchElementException e) { return null; }
+    }
+    public synchronized void saveGeminiKey(String owner, String encrypted) throws IOException {
+        account(owner); write("gemini_keys", owner, new GeminiKey(encrypted));
+    }
+    public synchronized void removeGeminiKey(String owner) throws IOException { Files.deleteIfExists(path("gemini_keys", owner)); }
     public Path media(String id) {
         if (!id.matches("[a-f0-9-]{36}")) throw new IllegalArgumentException("Invalid video ID");
         return root.resolve("media").resolve(id + ".mp4");

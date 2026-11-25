@@ -12,17 +12,18 @@ public class Jobs {
     @org.springframework.beans.factory.annotation.Value("${videoquiz.analysis-per-user-hour:0}") private int userLimit;
     @org.springframework.beans.factory.annotation.Value("${videoquiz.analysis-per-hour:0}") private int globalLimit;
     private final java.util.Map<String,java.util.ArrayDeque<Long>> requests = new java.util.HashMap<>();
-    private final Store store; private final Gemini gemini;
+    private final Store store; private final PersonalKeys keys;
     private final ExecutorService worker = Executors.newFixedThreadPool(2);
     private final Semaphore slots = new Semaphore(4);
     private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
-    public Jobs(Store store, Gemini gemini) { this.store=store; this.gemini=gemini; }
+    public Jobs(Store store, PersonalKeys keys) { this.store=store; this.keys=keys; }
     public void start(String id,String owner,Double duration) throws IOException {
         start(id,owner,duration,null);
     }
     public void start(String id,String owner,Double duration,String language) throws IOException {
         if(language!=null && !language.equals("en") && !language.equals("ar")) throw new IllegalArgumentException("Choose Arabic or English for quiz questions.");
         final String run=Store.id();
+        final Gemini gemini;
         synchronized(store) {
             Video v=store.video(id,owner);
             if(v.status.equals("PROCESSING")) return; // A timed-out POST may already have started this job.
@@ -32,6 +33,8 @@ public class Jobs {
                 v.duration=duration;
             }
             if (v.kind.equals("LOCAL") && (v.received != v.size || v.duration<=0)) throw new IllegalArgumentException("Finish uploading a valid video first.");
+            // Bind this job to the authenticated owner's current key before queueing any work.
+            gemini=keys.forAnalysis(owner);
             long now=System.currentTimeMillis();
             for(var queue:requests.values()) while(!queue.isEmpty() && queue.peekFirst()<=now-3600000) queue.removeFirst();
             requests.entrySet().removeIf(e -> e.getValue().isEmpty());

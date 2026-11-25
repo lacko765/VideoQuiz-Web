@@ -18,7 +18,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
 
 /** HTTP/security integration checks. Fixtures are intentionally synthetic, never production AI responses. */
-@SpringBootTest(properties={"server.ssl.enabled=false","server.ssl.key-store-password=test-only","videoquiz.gemini-key="})
+@SpringBootTest(properties={"spring.profiles.active=local","server.ssl.enabled=false","server.ssl.key-store-password=test-only",
+    "videoquiz.google-client-id=","videoquiz.google-client-secret=","videoquiz.key-encryption-key="})
 @AutoConfigureMockMvc
 class ApiTests {
     static Path root;
@@ -36,7 +37,10 @@ class ApiTests {
     @Test void anonymousCannotReadVideos() throws Exception {mvc.perform(get("/api/videos").secure(true)).andExpect(status().isUnauthorized());}
     @Test void registrationPasswordLoginAndLogoutUseRealSecurityChain() throws Exception {
         String user="user_"+UUID.randomUUID().toString().replace("-","").substring(0,12);
-        mvc.perform(post("/api/register").secure(true).with(csrf()).contentType("application/json").content("{\"username\":\""+user+"\",\"password\":\"fixture-password-123\"}")).andExpect(status().isOk());
+        String registration="{\"username\":\""+user+"\",\"password\":\"fixture-password-123\",\"confirmPassword\":\"fixture-password-123\"}";
+        mvc.perform(post("/api/register").secure(true).contentType("application/json").content(registration)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/register").secure(true).with(csrf()).contentType("application/json").content(registration)).andExpect(status().isOk());
+        mvc.perform(post("/api/register").secure(true).with(csrf()).contentType("application/json").content(registration)).andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value("Username is already registered."));
         Assertions.assertNotEquals("fixture-password-123",store.account(user).passwordHash());
         mvc.perform(post("/api/login").secure(true).with(csrf()).param("username",user).param("password","incorrect-password")).andExpect(status().isUnauthorized());
         var result=mvc.perform(post("/api/login").secure(true).with(csrf()).param("username",user).param("password","fixture-password-123")).andExpect(status().isOk()).andReturn();
@@ -46,6 +50,19 @@ class ApiTests {
         mvc.perform(get("/api/me").secure(true)).andExpect(status().isUnauthorized());
     }
     @Test void httpRedirectsToHttps() throws Exception {mvc.perform(get("/api/videos")).andExpect(status().is3xxRedirection());}
+    @Test void optionalGoogleLoginIsDisabledWithoutCredentials() throws Exception {
+        mvc.perform(get("/api/settings").secure(true)).andExpect(jsonPath("$.googleSignInEnabled").value(false));
+        mvc.perform(get("/oauth2/authorization/google").secure(true)).andExpect(status().isUnauthorized());
+    }
+    @Test void registrationRejectsMismatchedAndOversizedPasswords() throws Exception {
+        mvc.perform(post("/api/register").secure(true).with(csrf()).contentType("application/json")
+            .content("{\"username\":\"mismatch\",\"password\":\"long-password\",\"confirmPassword\":\"different-password\"}"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value("Passwords do not match."));
+        String password="ش".repeat(37);
+        mvc.perform(post("/api/register").secure(true).with(csrf()).contentType("application/json")
+            .content("{\"username\":\"oversized\",\"password\":\""+password+"\",\"confirmPassword\":\""+password+"\"}"))
+            .andExpect(status().isBadRequest());
+    }
     @Test @WithMockUser(username="alice") void answerKeysAreNotExposedBeforeSubmission() throws Exception {
         mvc.perform(get("/api/videos/"+video.id).secure(true)).andExpect(status().isOk()).andExpect(jsonPath("$.questions[0].correctIndex").doesNotExist()).andExpect(jsonPath("$.points").doesNotExist());
     }

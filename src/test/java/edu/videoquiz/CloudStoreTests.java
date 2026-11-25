@@ -21,6 +21,39 @@ class CloudStoreTests {
     };
     String url="jdbc:h2:mem:"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
     CloudStore open(String cache)throws Exception{return new CloudStore(dir.resolve(cache),DriverManager.getConnection(url),transport);}
+    @Test void googleProfilesPersistInCloudWithReservedIdentitiesAndLocalAccountsUnchanged() throws Exception {
+        String owner;
+        try(var s=open("google-first")) {
+            s.register("legacy","bcrypt-hash");owner=s.googleAccount("fixture-google-subject",0).username();
+            assertFalse(owner.matches("[a-z0-9_]{3,32}"));
+            assertThrows(IllegalArgumentException.class,()->s.register(owner,"hash"));
+        }
+        try(var s=open("google-second")) {
+            assertEquals(owner,s.googleAccount("fixture-google-subject",1).username());
+            assertNull(s.account(owner).passwordHash());assertEquals("fixture-google-subject",s.account(owner).googleSubject());
+            assertEquals("bcrypt-hash",s.account("legacy").passwordHash());
+            assertNotEquals(owner,s.googleAccount("different-google-subject",0).username());
+        }
+    }
+    @Test void encryptedPersonalKeysAreSeparateFromLegacyRecordsAndSurviveRestart() throws Exception {
+        var cipher=new KeyCipher(PersonalKeyTests.MASTER);String videoId;
+        try(var s=open("key-first")) {
+            s.register("alice","legacy-bcrypt-hash");s.register("bob","other-hash");
+            Video v=video(s);videoId=v.id;
+            s.saveGeminiKey("alice",cipher.encrypt("alice",PersonalKeyTests.ALICE));
+            s.saveGeminiKey("bob",cipher.encrypt("bob",PersonalKeyTests.BOB));
+        }
+        try(var s=open("key-second")) {
+            assertEquals(PersonalKeyTests.ALICE,cipher.decrypt("alice",s.geminiKey("alice").encrypted));
+            s.saveGeminiKey("alice",cipher.encrypt("alice",PersonalKeyTests.ALICE+"-new"));
+            assertEquals(PersonalKeyTests.ALICE+"-new",cipher.decrypt("alice",s.geminiKey("alice").encrypted));
+            try(var connection=DriverManager.getConnection(url);var p=connection.createStatement();var rows=p.executeQuery("SELECT body FROM videoquiz_private.records WHERE kind='gemini_keys'")) {
+                while(rows.next()){assertFalse(rows.getString(1).contains(PersonalKeyTests.ALICE));assertFalse(rows.getString(1).contains(PersonalKeyTests.BOB));}
+            }
+            s.removeGeminiKey("alice");assertNull(s.geminiKey("alice"));assertNotNull(s.geminiKey("bob"));
+            assertEquals("legacy-bcrypt-hash",s.account("alice").passwordHash());assertEquals(videoId,s.video(videoId,"alice").id);
+        }
+    }
     Video video(CloudStore s)throws Exception{Video v=new Video();v.id=Store.id();v.owner="alice";v.kind="LOCAL";v.size=5;s.initializeMedia(v);s.save(v);return v;}
     @Test void accountHistoryAndChunkedMediaSurviveEmptyCacheRestart()throws Exception{
         String id,attempt;

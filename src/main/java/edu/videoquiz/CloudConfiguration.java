@@ -13,7 +13,6 @@ public class CloudConfiguration {
     private CloudStore store;
     private CloudStore.ConnectionFactory connections;
     @Bean(destroyMethod="close") Store cloudStore(Environment env) throws Exception {
-        if(env.getProperty("videoquiz.gemini-key","").isBlank())throw new IllegalStateException("Set GEMINI_API_KEY in the hosting secret variables.");
         String host=env.getRequiredProperty("VIDEOQUIZ_DB_HOST");
         if(!host.matches("[a-z0-9.-]+\\.pooler\\.supabase\\.com"))throw new IllegalArgumentException("Use the Supabase session pooler hostname on port 5432.");
         Properties props=new Properties();
@@ -23,7 +22,7 @@ public class CloudConfiguration {
         props.setProperty("connectTimeout","15");props.setProperty("socketTimeout","30");props.setProperty("tcpKeepAlive","true");
         connections=()->DriverManager.getConnection("jdbc:postgresql://"+host+":5432/postgres",props);
         Connection db;
-       
+
 try {
     db = connections.open();
 } catch (SQLException e) {

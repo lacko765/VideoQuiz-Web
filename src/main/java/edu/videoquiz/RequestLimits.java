@@ -18,11 +18,13 @@ public class RequestLimits extends OncePerRequestFilter {
         res.setHeader("Cache-Control","no-store"); res.setHeader("Referrer-Policy","strict-origin-when-cross-origin");
         long max=path.startsWith("/api/uploads/") && req.getMethod().equals("PUT") ? 1024*1024 : 65536;
         if(req.getContentLengthLong()>max) { reject(res,413,"Request is too large."); return; }
-        if(req.getMethod().equals("POST") && (path.equals("/api/login") || path.equals("/api/register"))) {
+        if((req.getMethod().equals("POST") && (path.equals("/api/login") || path.equals("/api/register"))) ||
+           (req.getMethod().equals("PUT") && path.equals("/api/gemini-key"))) {
             long now=System.currentTimeMillis();
             if(windows.size()>10000) windows.entrySet().removeIf(e -> now-e.getValue().start>60000);
             if(windows.size()>10000) { reject(res,429,"Server is busy. Try again in a minute."); return; }
-            Window w=windows.compute(req.getRemoteAddr(),(k,v) -> v==null || now-v.start>60000 ? new Window(now,1) : new Window(v.start,v.count+1));
+            String bucket=(path.equals("/api/gemini-key")?"key:":"login:")+req.getRemoteAddr();
+            Window w=windows.compute(bucket,(k,v) -> v==null || now-v.start>60000 ? new Window(now,1) : new Window(v.start,v.count+1));
             if(w.count>15) { res.setHeader("Retry-After","60"); reject(res,429,"Too many sign-in attempts. Try again in one minute."); return; }
         }
         chain.doFilter(req,res);
